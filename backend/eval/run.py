@@ -75,6 +75,65 @@ def run_greedy(db: FalkorDB, line: str) -> Row:
     return score_unverified(db, g, incident_id, line, "greedy", ops, plan_ms)
 
 
+def describe_feeder(g: Graph) -> str:
+    """The text the tool-less LLM baseline gets: the isolated feeder, as an operator would see it."""
+    buses = g.ro_query(
+        "MATCH (b:Bus) RETURN b.id, b.zone, b.p_kw, b.q_kvar, b.facility ORDER BY b.id"
+    ).result_set
+    lines = g.ro_query(
+        """
+        MATCH (a:Bus)-[r:SEG|SW]->(b:Bus)
+        RETURN r.id, CASE type(r) WHEN 'SEG' THEN 'segment' ELSE r.kind END,
+               coalesce(r.status, 'closed'), r.r_ohm, r.x_ohm, r.cap_kva
+        ORDER BY a.id, b.id
+        """
+    ).result_set
+    zones = g.ro_query(
+        "MATCH (z:Zone) RETURN z.id, z.energized, z.faulted ORDER BY z.id"
+    ).result_set
+
+    out = ["Substation at bus 1, 12.66 kV nominal. Zones are named by their lowest bus.",
+           "", "Zones:"]
+    for zone, energized, faulted in zones:
+        state = "FAULTED (isolated)" if faulted else "energized" if energized else "dark"
+        out.append(f"  Z{zone}: {state}")
+    out += ["", "Buses (id, zone, P kW, Q kVAr, critical facility):"]
+    for bus, zone, p_kw, q_kvar, facility in buses:
+        zone_name = f"Z{zone}" if zone is not None else "substation"
+        out.append(f"  {bus}, {zone_name}, {p_kw:.0f}, {q_kvar:.0f}, {facility or '-'}")
+    out += ["", "Lines (id, type, status, R ohm, X ohm, rating kVA); only switches can be "
+                "operated:"]
+    for line_id, kind, status, r_ohm, x_ohm, cap in lines:
+        out.append(f"  {line_id}, {kind}, {status}, {r_ohm:.3f}, {x_ohm:.3f}, {cap:.0f}")
+    return "\n".join(out)
+
+
+def run_llm_only(db: FalkorDB, line: str, client, model: str) -> Row:
+    from gridmend.agent.llm import llm_only_switching
+    from gridmend.grid.load import load_assumptions
+
+    g, incident_id = isolated_graph(db, line)
+    start = time.perf_counter()
+    try:
+        plan = llm_only_switching(client, model, describe_feeder(g),
+                                  load_assumptions()["voltage_min_pu"])
+    except ValueError:
+        # No usable plan in the reply: an operator could not act on it, so it counts as a failure.
+        return Row(line, "llm-only", 0.0, 0, 0, 1, 1000 * (time.perf_counter() - start))
+    plan_ms = 1000 * (time.perf_counter() - start)
+
+    # Switch ids the model invented cannot be operated; each one counts as a violation.
+    known = {row[0] for row in g.ro_query("MATCH ()-[s:SW]->() RETURN s.id").result_set}
+    ops = ([SwitchOp(s, "open") for s in plan["open"] if s in known]
+           + [SwitchOp(s, "close") for s in plan["close"] if s in known])
+    invalid = sum(s not in known for s in plan["open"] + plan["close"])
+    row = score_unverified(db, g, incident_id, line, "llm-only", ops, plan_ms)
+    if invalid:
+        row.violations += invalid
+        row.restored_kw, row.critical = 0.0, 0
+    return row
+
+
 def run_gridmend(db: FalkorDB, feeder: Feeder, line: str) -> Row:
     g, incident_id = isolated_graph(db, line)
     start = time.perf_counter()

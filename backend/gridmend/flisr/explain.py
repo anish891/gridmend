@@ -1,6 +1,7 @@
 from falkordb import Graph
 
 from gridmend.flisr.candidates import screen
+from gridmend.grid.energize import grid_status
 
 
 def feeding_path(g: Graph, zone: int) -> list[str]:
@@ -130,6 +131,7 @@ def explain_incident(g: Graph, incident_id: str) -> dict:
             "reason": None if energized else why_dark(g, incident_id, zone, faulted),
         })
 
+    status = grid_status(g)
     return {
         "incident": incident_id,
         "fault_line": incident[0],
@@ -139,4 +141,7 @@ def explain_incident(g: Graph, incident_id: str) -> dict:
         "plan": plan,
         "rejected": rejected_plans(g, incident_id),
         "critical": critical,
+        "dark_zones": status["dark_zones"],
+        "load_served_kw": round(status["served_kw"]),
+        "load_unserved_kw": round(status["total_kw"] - status["served_kw"]),
     }

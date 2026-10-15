@@ -62,6 +62,8 @@ def test_explanation_traces_paths_margins_and_shed_critical_loads(falkordb, grap
     assert set(dark) == {"water pumping", "telecom"}
     assert "18-33" in dark["telecom"] and "overload" in dark["telecom"]
     assert {r["violations"][0].split(":")[0] for r in e["rejected"]} == {"capacity", "radiality"}
+    assert e["dark_zones"] == [3, 10, 23, 26, 30]
+    assert e["load_served_kw"] == 1310 and e["load_unserved_kw"] == 2405
 
 
 def test_explanation_when_no_plan_passes(falkordb, graph):

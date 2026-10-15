@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 
 from gridmend import db
@@ -282,10 +283,68 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_eval(args: argparse.Namespace) -> int:
-    from eval.run import markdown, run_all, summarize, write_outputs
+def summarize_step(name: str, result: dict) -> str:
+    if "error" in result:
+        return f"error: {result['error']}"
+    if name == "locate_fault":
+        return f"Z{result['faulted_zone']} via {' -> '.join(result['indicator_chain'])}"
+    if name == "isolation_plan":
+        return ", ".join(result["executed"])
+    if name == "restoration_candidates":
+        return f"{len(result['candidates'])} candidates"
+    if name == "verify_plan":
+        verdict = "PASS" if result["passed"] else "REJECTED " + "; ".join(
+            v.split(":")[0] for v in result["violations"])
+        return f"{result['plan_id']} {verdict}, {result['restored_kw']} kW"
+    if name == "execute_plan":
+        return "executed" if result["executed"] else result["reason"]
+    return "ok"
 
-    rows = run_all(db.connect())
+
+def cmd_agent(args: argparse.Namespace) -> int:
+    from gridmend.agent.llm import make_client
+    from gridmend.agent.loop import run_agent
+    from gridmend.agent.tools import GridTools
+    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.sim import FaultError, apply_fault
+
+    conn = db.connect()
+    g = conn.select_graph(LIVE_GRAPH)
+    try:
+        apply_fault(g, args.line)
+    except FaultError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"fault on {args.line}; breaker tripped")
+
+    def approve(plan: dict) -> bool:
+        critical = ", ".join(plan["critical"]) or "no critical loads"
+        print(f"agent asks to execute {plan['id']}: {plan['restored_kw']:.0f} kW, {critical}")
+        if args.auto:
+            return True
+        return input("approve? [y/N] ").strip().lower() == "y"
+
+    def on_step(name: str, call_args: dict, result: dict) -> None:
+        shown = f"({json.dumps(call_args)})" if call_args else "()"
+        print(f"  -> {name}{shown}: {summarize_step(name, result)}")
+
+    client, model = make_client()
+    answer = run_agent(client, model, GridTools(conn, g, approve), on_step)
+    print()
+    print(answer)
+    return 0
+
+
+def cmd_eval(args: argparse.Namespace) -> int:
+    from eval.run import markdown, run_all, run_llm_only, summarize, write_outputs
+
+    extra = []
+    if args.llm_only:
+        from gridmend.agent.llm import make_client
+
+        client, model = make_client()
+        extra.append(lambda conn, line: run_llm_only(conn, line, client, model))
+    rows = run_all(db.connect(), extra)
     summary = summarize(rows)
     out = write_outputs(rows, summary)
     print(markdown(rows, summary))
@@ -346,9 +405,15 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--auto", action="store_true", help="execute the best plan without asking")
     run.set_defaults(func=cmd_run)
 
-    sub.add_parser("eval", help="run all single faults against the baselines").set_defaults(
-        func=cmd_eval
-    )
+    evaluate = sub.add_parser("eval", help="run all single faults against the baselines")
+    evaluate.add_argument("--llm-only", action="store_true",
+                          help="also run the tool-less LLM baseline")
+    evaluate.set_defaults(func=cmd_eval)
+
+    agent = sub.add_parser("agent", help="fault a line and let the LLM operator restore it")
+    agent.add_argument("line")
+    agent.add_argument("--auto", action="store_true", help="approve the agent's plan without asking")
+    agent.set_defaults(func=cmd_agent)
 
     return parser
 
