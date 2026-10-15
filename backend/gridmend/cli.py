@@ -199,6 +199,89 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if result.passed else 2
 
 
+def cmd_plan(args: argparse.Namespace) -> int:
+    from gridmend.flisr.candidates import plan_restoration
+    from gridmend.flisr.trace import open_incident
+    from gridmend.grid.load import LIVE_GRAPH
+
+    conn = db.connect()
+    g = conn.select_graph(LIVE_GRAPH)
+    incident = open_incident(g)
+    if not incident or incident["status"] != "isolated":
+        print("no isolated incident; run fault and isolate first", file=sys.stderr)
+        return 1
+
+    verified = plan_restoration(conn, g, incident["id"])
+    if not verified:
+        print("no restoration candidates: no dead zone can be reached from a live one")
+        return 0
+    for rank, (candidate, result) in enumerate(verified, 1):
+        print(f"#{rank} [{candidate.origin}] score {candidate.score:.0f}, "
+              f"claims {zone_list(list(candidate.claims))} ({candidate.claimed_kw:.0f} kW)")
+        print_verify(result)
+        print()
+    return 0
+
+
+def print_explanation(e: dict) -> None:
+    print(f"incident {e['incident']}: fault on {e['fault_line']} in Z{e['faulted_zone']} "
+          f"({e['status']})")
+    print(f"isolation: {', '.join(e['isolation'])}")
+    plan = e["plan"]
+    if plan:
+        print(f"executed {plan['id']}: {', '.join(plan['ops'])}")
+        print(f"  restored {plan['restored_kw']:.0f} kW; margins: min voltage "
+              f"{plan['min_v_pu']:.3f} pu, max loading {plan['max_loading_pct']:.0f}%")
+        for zone, path in plan["paths"].items():
+            print(f"  Z{zone} fed via {' -> '.join(path)}")
+    else:
+        print("no restoration plan executed")
+    print("critical loads:")
+    for c in e["critical"]:
+        state = "restored" if c["energized"] else "dark"
+        line = f"  {c['facility']} (bus {c['bus']}, Z{c['zone']}): {state}"
+        print(line + (f" - {c['reason']}" if c["reason"] else ""))
+    if e["rejected"]:
+        print("rejected alternatives:")
+        for r in e["rejected"]:
+            print(f"  {r['id']} ({', '.join(r['ops'])}): {'; '.join(r['violations'])}")
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    from gridmend.flisr.execute import restore
+    from gridmend.flisr.explain import explain_incident
+    from gridmend.flisr.isolate import isolate
+    from gridmend.flisr.locate import locate_fault
+    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.sim import FaultError, apply_fault
+
+    conn = db.connect()
+    g = conn.select_graph(LIVE_GRAPH)
+    try:
+        apply_fault(g, args.line)
+    except FaultError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    location = locate_fault(g)
+    print(f"located Z{location.zone} from indicators {' -> '.join(location.chain)}")
+    incident_id, _ = isolate(g)
+
+    def approve(plan: dict) -> bool:
+        critical = ", ".join(plan["critical"]) or "no critical loads"
+        print(f"best verified plan {plan['id']}: {plan['restored_kw']:.0f} kW, {critical}, "
+              f"{plan['switch_ops']} switch ops")
+        if args.auto:
+            return True
+        return input("execute it? [y/N] ").strip().lower() == "y"
+
+    verified, executed = restore(conn, g, incident_id, approve)
+    passed = sum(r.passed for _, r in verified)
+    print(f"{len(verified)} candidates verified on forks, {passed} passed")
+    print()
+    print_explanation(explain_incident(g, incident_id))
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     from gridmend.sim import reset
 
@@ -242,6 +325,15 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--close", default="", help="comma-separated switch ids to close")
     verify.add_argument("--open", default="", help="comma-separated switch ids to open")
     verify.set_defaults(func=cmd_verify)
+
+    sub.add_parser("plan", help="generate, rank and verify restoration candidates").set_defaults(
+        func=cmd_plan
+    )
+
+    run = sub.add_parser("run", help="fault a line and run the full FLISR loop")
+    run.add_argument("line")
+    run.add_argument("--auto", action="store_true", help="execute the best plan without asking")
+    run.set_defaults(func=cmd_run)
 
     return parser
 

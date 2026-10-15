@@ -208,6 +208,10 @@ def record_verification(live: Graph, result: VerifyResult) -> None:
             "violations": [list(v) for v in result.violations],
         },
     )
+    live.query(
+        "MATCH (p:Plan {id: $id}), (z:Zone) WHERE z.id IN $restored CREATE (p)-[:RESTORES]->(z)",
+        {"id": result.plan_id, "restored": result.restored_zones},
+    )
 
 
 def next_plan_id(g: Graph, incident_id: str, prefix: str) -> str:
