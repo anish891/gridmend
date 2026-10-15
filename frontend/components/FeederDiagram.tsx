@@ -3,7 +3,7 @@
 import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
 import { useEffect, useRef } from "react";
 
-import type { GridState, Line } from "@/lib/api";
+import type { GridState, Line, SwitchOp } from "@/lib/api";
 import { BUS_POSITIONS, CURVED_TIES } from "@/lib/layout";
 
 const COLORS = {
@@ -54,7 +54,7 @@ export function toElements(state: GridState): ElementDefinition[] {
       elements.push({
         group: "edges",
         data: { id: `l${line.id}`, source: from, target: to, line: line.id },
-        classes: line.faulted ? "faulted" : live ? "live" : "dark",
+        classes: ["segment", line.faulted ? "faulted" : live ? "live" : "dark"].join(" "),
       });
       continue;
     }
@@ -125,11 +125,30 @@ const STYLE: cytoscape.StylesheetJson = [
   { selector: "edge.live", style: { "line-color": COLORS.live } },
   { selector: "edge.faulted", style: { "line-color": COLORS.faulted, width: 5 } },
   { selector: "edge.tie", style: { "line-style": "dashed", width: 2 } },
+  // A candidate plan under review: switches it would close or open.
+  {
+    selector: "node.switch.to-close",
+    style: { "border-color": "#1a73e8", "border-width": 4, width: 14, height: 14 },
+  },
+  {
+    selector: "node.switch.to-open",
+    style: { "border-color": "#a142f4", "border-width": 4, width: 14, height: 14 },
+  },
+  { selector: "edge.segment.hover", style: { width: 7 } },
 ];
 
-export default function FeederDiagram({ state }: { state: GridState }) {
+type Props = {
+  state: GridState;
+  onSegmentClick?: (lineId: string) => void;
+  highlight?: SwitchOp[];
+};
+
+export default function FeederDiagram({ state, onSegmentClick, highlight = [] }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
+  // Elements are rebuilt on every state change, so the tap handler reads the latest callback.
+  const onClick = useRef(onSegmentClick);
+  onClick.current = onSegmentClick;
 
   useEffect(() => {
     cy.current = cytoscape({
@@ -140,6 +159,16 @@ export default function FeederDiagram({ state }: { state: GridState }) {
       boxSelectionEnabled: false,
       minZoom: 0.3,
       maxZoom: 3,
+    });
+    cy.current.on("tap", "edge.segment", (event) => onClick.current?.(event.target.data("line")));
+    cy.current.on("mouseover", "edge.segment", (event) => {
+      if (!onClick.current) return;
+      event.target.addClass("hover");
+      container.current!.style.cursor = "pointer";
+    });
+    cy.current.on("mouseout", "edge.segment", (event) => {
+      event.target.removeClass("hover");
+      container.current!.style.cursor = "default";
     });
     // The container's size settles after mount and changes with the window, so refit.
     const observer = new ResizeObserver(() => {
@@ -165,5 +194,20 @@ export default function FeederDiagram({ state }: { state: GridState }) {
     }
   }, [state]);
 
-  return <div ref={container} className="diagram" />;
+  useEffect(() => {
+    const graph = cy.current;
+    if (!graph) return;
+    graph.nodes(".switch").removeClass("to-close to-open");
+    for (const op of highlight) {
+      graph.getElementById(`s${op.switch_id}`).addClass(op.op === "close" ? "to-close" : "to-open");
+    }
+  }, [state, highlight]);
+
+  return (
+    <div
+      ref={container}
+      className="diagram"
+      title={onSegmentClick ? "Click a line segment to fault it" : undefined}
+    />
+  );
 }
