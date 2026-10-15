@@ -1,6 +1,11 @@
-# Builds the UI as static files, then runs FalkorDB, the API and the UI in one container.
+# Runs FalkorDB, the API and the UI in one container.
+#
+# The UI and the evaluation results are the same on every platform, so both are built on the
+# build machine's own platform. That also keeps FalkorDB out of emulated multi-arch builds,
+# where it does not run reliably.
+ARG FALKORDB_IMAGE=falkordb/falkordb:6.0.1
 
-FROM node:22-slim AS ui
+FROM --platform=$BUILDPLATFORM node:22-slim AS ui
 WORKDIR /ui
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -8,24 +13,31 @@ COPY frontend/ ./
 ENV NEXT_PUBLIC_API_URL=/api
 RUN npm run build
 
-FROM falkordb/falkordb:6.0.1
-COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /usr/local/bin/uv
-ENV UV_PYTHON_INSTALL_DIR=/opt/python \
-    UV_LINK_MODE=copy \
-    PATH=/opt/venv/bin:$PATH \
-    PORT=7860
+# COPY --from=<image> resolves the image for the target platform, so the natively built
+# stage needs its own uv stage.
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:0.12.23 AS uv-native
+FROM ghcr.io/astral-sh/uv:0.12.23 AS uv-target
 
+FROM --platform=$BUILDPLATFORM ${FALKORDB_IMAGE} AS results
+COPY --from=uv-native /uv /usr/local/bin/uv
+ENV UV_PYTHON_INSTALL_DIR=/opt/python UV_LINK_MODE=copy PATH=/opt/venv/bin:$PATH
 WORKDIR /app
 COPY backend/ backend/
-RUN uv venv -p 3.12 /opt/venv \
-    && uv pip install -p /opt/venv --no-cache -e ./backend
-
-# The evaluation needs a running FalkorDB but only takes seconds with build-time CPU,
-# so its results ship in the image instead of being recomputed on a small host.
+RUN uv venv -p 3.12 /opt/venv && uv pip install -p /opt/venv --no-cache -e ./backend
 COPY deploy/ deploy/
+# The evaluation needs a running FalkorDB and takes seconds with build-time CPU, so its
+# results ship in the image instead of being recomputed on a small host.
 RUN deploy/falkordb.sh && gridmend load && gridmend eval > /dev/null \
     && redis-cli shutdown nosave
 
+FROM ${FALKORDB_IMAGE}
+COPY --from=uv-target /uv /usr/local/bin/uv
+ENV UV_PYTHON_INSTALL_DIR=/opt/python UV_LINK_MODE=copy PATH=/opt/venv/bin:$PATH PORT=7860
+WORKDIR /app
+COPY backend/ backend/
+RUN uv venv -p 3.12 /opt/venv && uv pip install -p /opt/venv --no-cache -e ./backend
+COPY deploy/ deploy/
+COPY --from=results /app/backend/eval/out backend/eval/out
 COPY --from=ui /ui/out /app/ui
 
 EXPOSE 7860
