@@ -1,12 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import CandidateList from "@/components/CandidateList";
 import ExplanationPanel from "@/components/ExplanationPanel";
 import FeederDiagram from "@/components/FeederDiagram";
+import Intro from "@/components/Intro";
+import StatusStrip from "@/components/StatusStrip";
+import Stepper from "@/components/Stepper";
 import Timeline from "@/components/Timeline";
+import TopBar from "@/components/TopBar";
 import { api, type Explanation, type GridState, type Location, type PlanResult, type Trace } from "@/lib/api";
 
 // Short pauses between automatic steps so each one is visible on the diagram.
@@ -14,9 +17,14 @@ const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 type Step = "fault" | "locate" | "plan";
 
+// Stepper indices: Fault, Locate, Isolate, Verify plans, Approve, Restored.
+const STEP = { fault: 0, locate: 1, isolate: 2, verify: 3, approve: 4, restored: 5 };
+
 export default function Home() {
   const [state, setState] = useState<GridState | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState<{ step: number; message: string } | null>(null);
+  const [startedAt, setStartedAt] = useState(0);
+  const [now, setNow] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [fault, setFault] = useState<string | null>(null);
   const [location, setLocation] = useState<Location | null>(null);
@@ -25,6 +33,18 @@ export default function Home() {
   const [executed, setExecuted] = useState<string | null>(null);
   const [trace, setTrace] = useState<Trace | null>(null);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
+
+  const working = useCallback((step: number, message: string) => {
+    setBusy({ step, message });
+    setStartedAt(Date.now());
+    setNow(Date.now());
+  }, []);
+
+  useEffect(() => {
+    if (!busy) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
 
   const refresh = useCallback(async () => {
     const next = await api.state();
@@ -36,24 +56,24 @@ export default function Home() {
     setError(null);
     try {
       if (from === "fault" && line) {
-        setBusy(`Fault on ${line}: breaker tripped`);
+        working(STEP.fault, `Fault on line ${line}: the breaker trips and the feeder goes dark`);
         await api.fault(line);
         setFault(line);
         await refresh();
-        await pause(900);
+        await pause(1000);
       }
       if (from !== "plan") {
-        setBusy("Locating the fault from the indicator chain");
+        working(STEP.locate, "Following the chain of tripped fault indicators");
         setLocation(await api.locate());
         await refresh();
-        await pause(900);
-        setBusy("Isolating the faulted zone");
+        await pause(1000);
+        working(STEP.isolate, "Opening the faulted zone's boundary switches and reclosing the breaker");
         await api.isolate();
         await refresh();
         setTrace(await api.trace());
-        await pause(600);
+        await pause(700);
       }
-      setBusy("Generating candidates and verifying each one on a forked graph");
+      working(STEP.verify, "Generating restoration plans and verifying each one on a forked graph");
       const result = await api.plan();
       setPlan(result);
       setSelected(result.recommended);
@@ -63,11 +83,11 @@ export default function Home() {
     } finally {
       setBusy(null);
     }
-  }, [refresh]);
+  }, [refresh, working]);
 
   const approve = useCallback(async (planId: string) => {
     setError(null);
-    setBusy(`Executing ${planId}`);
+    working(STEP.approve, `Executing ${planId} on the live graph`);
     try {
       await api.execute(planId);
       setExecuted(planId);
@@ -80,11 +100,11 @@ export default function Home() {
     } finally {
       setBusy(null);
     }
-  }, [refresh]);
+  }, [refresh, working]);
 
   const resetGrid = useCallback(async () => {
     setError(null);
-    setBusy("Resetting the feeder");
+    working(STEP.fault, "Restoring the healthy feeder");
     try {
       await api.reset();
       setFault(null);
@@ -100,7 +120,7 @@ export default function Home() {
     } finally {
       setBusy(null);
     }
-  }, [refresh]);
+  }, [refresh, working]);
 
   // Pick up an incident already in progress, e.g. after a page reload.
   useEffect(() => {
@@ -115,25 +135,49 @@ export default function Home() {
   }, [refresh]);
 
   const healthy = state !== null && !state.incident && !state.lines.some((l) => l.faulted);
-  const highlight = plan?.candidates.find((c) => c.plan_id === selected)?.ops ?? [];
   const status = state?.incident?.status;
+  const highlight = plan?.candidates.find((c) => c.plan_id === selected)?.ops ?? [];
+  const nothingPassed = plan !== null && !plan.candidates.some((c) => c.passed);
+
+  // How far the incident has got, for the stepper.
+  const done = healthy ? 0
+    : status === "restored" ? STEP.restored + 1
+    : plan ? STEP.approve
+    : status === "isolated" ? STEP.verify
+    : location ? STEP.isolate
+    : STEP.locate;
+
+  const message = busy ? busy.message
+    : healthy ? "The feeder is healthy. Pick a demo fault or click any line segment on the diagram."
+    : status === "restored" ? "Service restored. The explanation below is read back from the decision trace."
+    : nothingPassed ? "No candidate passed verification, so nothing unsafe is executed; the fault stays isolated."
+    : plan ? "Hover a candidate to preview its switching on the diagram, then approve one that passed."
+    : status === "isolated" ? <button onClick={() => run("plan")}>Generate and verify plans</button>
+    : fault ? <button onClick={() => run("locate")}>Locate and isolate</button>
+    : null;
 
   return (
     <main>
-      <header>
-        <h1>GridMend</h1>
-        <nav>
-          <Link href="/" className="active">Feeder</Link>
-          <Link href="/results">Results</Link>
-        </nav>
+      <TopBar page="feeder">
         <button className="secondary" disabled={busy !== null || healthy} onClick={resetGrid}>
           Reset feeder
         </button>
-      </header>
+      </TopBar>
       {error && <p className="error">{error}</p>}
+      {state && <StatusStrip state={state} trace={trace} />}
+      <Stepper
+        done={done}
+        active={busy?.step ?? null}
+        elapsed={Math.round((now - startedAt) / 1000)}
+        message={message}
+      />
 
       <div className="layout">
-        <div className="main-column">
+        <section className="card diagram-card">
+          <div className="card-head">
+            <h2>IEEE 33-bus feeder</h2>
+            <span className="muted small">hover any bus, line or switch for details</span>
+          </div>
           {state && (
             <FeederDiagram
               state={state}
@@ -145,62 +189,47 @@ export default function Home() {
             <li><span className="swatch live" /> energized</li>
             <li><span className="swatch dark" /> de-energized</li>
             <li><span className="swatch faulted" /> faulted zone</li>
-            <li><span className="box closed" /> switch closed</li>
-            <li><span className="box open" /> switch open</li>
-            <li><span className="box fi" /> indicator set</li>
+            <li><span className="box closed" /> closed switch</li>
+            <li><span className="box open" /> open switch</li>
             <li><span className="dash" /> tie</li>
+            <li><span className="box fi" /> indicator set</li>
             <li><span className="box to-close" /> plan closes</li>
             <li><span className="box to-open" /> plan opens</li>
             <li><span className="star">★</span> critical load</li>
           </ul>
+        </section>
 
-          <div className="status-bar">
-            {busy && <span className="spinner" />}
-            {busy ??
-              (healthy
-                ? "Healthy. Click any line segment to fault it."
-                : fault && !status && !plan
-                  ? <button onClick={() => run("locate")}>Locate and isolate</button>
-                  : status === "isolated" && !plan
-                    ? <button onClick={() => run("plan")}>Generate restoration plans</button>
-                    : plan && !executed
-                      ? "Hover a candidate to preview its switching; approve one that passed."
-                      : status === "restored"
-                        ? "Restored. The explanation below is built from the decision trace."
-                        : null)}
-          </div>
-
-          {plan && (
-            <section className="card">
-              <h2>Restoration candidates</h2>
-              {plan.candidates.length === 0 ? (
-                <p className="muted">No dead zone can be reached from a live one.</p>
-              ) : (
-                <CandidateList
-                  candidates={plan.candidates}
-                  recommended={plan.recommended}
-                  selected={selected}
-                  executed={executed}
-                  busy={busy !== null}
-                  onSelect={(id) => !executed && setSelected(id)}
-                  onApprove={approve}
-                />
-              )}
-            </section>
-          )}
-          {explanation && <ExplanationPanel e={explanation} />}
-        </div>
-
-        {state && (
-          <Timeline
-            fault={fault}
-            location={location}
-            trace={trace}
-            servedKw={state.served_kw}
-            totalKw={state.total_kw}
-          />
+        {healthy ? (
+          <Intro disabled={busy !== null} onFault={(line) => run("fault", line)} />
+        ) : (
+          <Timeline fault={fault} location={location} trace={trace} />
         )}
       </div>
+
+      {plan && (
+        <section className="card">
+          <div className="card-head">
+            <h2>Restoration candidates</h2>
+            <span className="muted small">
+              ranked by weighted restored load; each one checked on its own copy of the graph
+            </span>
+          </div>
+          {plan.candidates.length === 0 ? (
+            <p className="muted">No dead zone can be reached from a live one, so there is nothing to restore.</p>
+          ) : (
+            <CandidateList
+              candidates={plan.candidates}
+              recommended={plan.recommended}
+              selected={selected}
+              executed={executed}
+              busy={busy !== null}
+              onSelect={(id) => !executed && setSelected(id)}
+              onApprove={approve}
+            />
+          )}
+        </section>
+      )}
+      {explanation && <ExplanationPanel e={explanation} />}
     </main>
   );
 }

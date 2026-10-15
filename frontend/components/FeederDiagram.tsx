@@ -1,18 +1,54 @@
 "use client";
 
 import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { GridState, Line, SwitchOp } from "@/lib/api";
 import { BUS_POSITIONS, CURVED_TIES } from "@/lib/layout";
 
 const COLORS = {
-  live: "#2e9d57",
-  dark: "#9aa0a6",
+  live: "#1e8e4e",
+  dark: "#b0b6bd",
   faulted: "#d93025",
-  switchBorder: "#202124",
-  label: "#3c4043",
+  switchBorder: "#1f2328",
+  label: "#4a5058",
+  fi: "#e8710a",
+  close: "#1a73e8",
+  open: "#9334e6",
 };
+
+type Tooltip = { x: number; y: number; title: string; lines: string[] };
+
+// Hover text for a bus, segment or switch, read from the latest grid state.
+function describe(state: GridState, kind: string, id: string, clickable: boolean): Omit<Tooltip, "x" | "y"> {
+  if (kind === "bus") {
+    const bus = state.buses.find((b) => `${b.id}` === id)!;
+    if (bus.is_source) return { title: "Substation", lines: ["bus 1, feeder source"] };
+    return {
+      title: bus.facility ? `Bus ${bus.id}: ${bus.facility}` : `Bus ${bus.id}`,
+      lines: [`zone Z${bus.zone}, ${Math.round(bus.p_kw)} kW`, bus.energized ? "energized" : "de-energized"],
+    };
+  }
+  const line = state.lines.find((l) => l.id === id)!;
+  if (line.type === "segment") {
+    return {
+      title: `Line ${line.id}`,
+      lines: [
+        `unswitched segment, rated ${line.cap_kva} kVA`,
+        ...(line.faulted ? ["FAULTED"] : []),
+        ...(clickable ? ["click to fault this line"] : []),
+      ],
+    };
+  }
+  return {
+    title: `${line.kind[0].toUpperCase()}${line.kind.slice(1)} ${line.id}`,
+    lines: [
+      `${line.status}${line.status !== line.normally ? ` (normally ${line.normally})` : ""}`,
+      ...(line.fi && line.fi !== "none" ? [`fault indicator: ${line.fi}`] : []),
+      `rated ${line.cap_kva} kVA`,
+    ],
+  };
+}
 
 function midpoint(line: Line): [number, number] {
   const [x1, y1] = BUS_POSITIONS[line.from];
@@ -39,6 +75,8 @@ export function toElements(state: GridState): ElementDefinition[] {
       group: "nodes",
       data: {
         id: `b${bus.id}`,
+        kind: "bus",
+        ref: `${bus.id}`,
         label: bus.is_source ? "substation" : bus.critical ? `${bus.id} ${bus.facility}` : `${bus.id}`,
       },
       position: { x, y },
@@ -53,7 +91,7 @@ export function toElements(state: GridState): ElementDefinition[] {
       const live = energized.get(line.from) && energized.get(line.to);
       elements.push({
         group: "edges",
-        data: { id: `l${line.id}`, source: from, target: to, line: line.id },
+        data: { id: `l${line.id}`, source: from, target: to, line: line.id, kind: "line", ref: line.id },
         classes: ["segment", line.faulted ? "faulted" : live ? "live" : "dark"].join(" "),
       });
       continue;
@@ -63,7 +101,7 @@ export function toElements(state: GridState): ElementDefinition[] {
     const sw = `s${line.id}`;
     elements.push({
       group: "nodes",
-      data: { id: sw, label: line.id, line: line.id },
+      data: { id: sw, label: line.id, line: line.id, kind: "line", ref: line.id },
       position: { x, y },
       classes: `switch ${line.kind} ${line.status} fi-${line.fi}`,
     });
@@ -88,17 +126,17 @@ const STYLE: cytoscape.StylesheetJson = [
       height: 12,
       "background-color": COLORS.dark,
       label: "data(label)",
-      "font-size": 9,
+      "font-size": 10,
       color: COLORS.label,
       "text-valign": "bottom",
-      "text-margin-y": 3,
+      "text-margin-y": 4,
     },
   },
   { selector: "node.live", style: { "background-color": COLORS.live } },
   { selector: "node.faulted", style: { "background-color": COLORS.faulted } },
   {
     selector: "node.critical",
-    style: { shape: "star", width: 22, height: 22, "font-weight": "bold", "font-size": 10 },
+    style: { shape: "star", width: 24, height: 24, "font-weight": "bold", "font-size": 11 },
   },
   { selector: "node.source", style: { shape: "round-rectangle", width: 34, height: 22 } },
   {
@@ -110,14 +148,15 @@ const STYLE: cytoscape.StylesheetJson = [
       "background-color": COLORS.switchBorder,
       "border-width": 1.5,
       "border-color": COLORS.switchBorder,
-      "font-size": 7,
+      "font-size": 8,
       "text-valign": "top",
       "text-margin-y": -3,
     },
   },
   { selector: "node.switch.open", style: { "background-color": "#ffffff" } },
+  { selector: "node.switch.tie", style: { "font-size": 7, color: "#80868b" } },
   { selector: "node.switch.breaker", style: { width: 14, height: 14 } },
-  { selector: "node.switch.fi-set", style: { "border-color": "#f29900", "border-width": 3 } },
+  { selector: "node.switch.fi-set", style: { "border-color": COLORS.fi, "border-width": 3 } },
   {
     selector: "edge",
     style: { width: 3, "line-color": COLORS.dark, "curve-style": "straight" },
@@ -128,11 +167,11 @@ const STYLE: cytoscape.StylesheetJson = [
   // A candidate plan under review: switches it would close or open.
   {
     selector: "node.switch.to-close",
-    style: { "border-color": "#1a73e8", "border-width": 4, width: 14, height: 14 },
+    style: { "border-color": COLORS.close, "border-width": 4, width: 15, height: 15 },
   },
   {
     selector: "node.switch.to-open",
-    style: { "border-color": "#a142f4", "border-width": 4, width: 14, height: 14 },
+    style: { "border-color": COLORS.open, "border-width": 4, width: 15, height: 15 },
   },
   { selector: "edge.segment.hover", style: { width: 7 } },
 ];
@@ -149,6 +188,9 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [] }:
   // Elements are rebuilt on every state change, so the tap handler reads the latest callback.
   const onClick = useRef(onSegmentClick);
   onClick.current = onSegmentClick;
+  const latest = useRef(state);
+  latest.current = state;
+  const [tooltip, setTooltip] = useState<Tooltip | null>(null);
 
   useEffect(() => {
     cy.current = cytoscape({
@@ -170,6 +212,14 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [] }:
       event.target.removeClass("hover");
       container.current!.style.cursor = "default";
     });
+    cy.current.on("mouseover", "node, edge", (event) => {
+      const { x, y } = event.renderedPosition ?? event.target.renderedPosition();
+      const info = describe(latest.current, event.target.data("kind"), event.target.data("ref"),
+        Boolean(onClick.current));
+      setTooltip({ x, y, ...info });
+    });
+    cy.current.on("mouseout", "node, edge", () => setTooltip(null));
+    cy.current.on("viewport", () => setTooltip(null));
     // The container's size settles after mount and changes with the window, so refit.
     const observer = new ResizeObserver(() => {
       cy.current?.resize();
@@ -204,10 +254,14 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [] }:
   }, [state, highlight]);
 
   return (
-    <div
-      ref={container}
-      className="diagram"
-      title={onSegmentClick ? "Click a line segment to fault it" : undefined}
-    />
+    <div className="diagram-wrap">
+      <div ref={container} className="diagram" />
+      {tooltip && (
+        <div className="tooltip" style={{ left: tooltip.x, top: tooltip.y }}>
+          <b>{tooltip.title}</b>
+          {tooltip.lines.map((line) => <div key={line}>{line}</div>)}
+        </div>
+      )}
+    </div>
   );
 }

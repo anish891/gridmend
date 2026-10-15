@@ -4,47 +4,42 @@ type Props = {
   fault: string | null;
   location: Location | null;
   trace: Trace | null;
-  servedKw: number;
-  totalKw: number;
 };
 
 const STATUS_LABEL: Record<string, string> = {
   executed: "executed",
-  verified: "passed on fork",
-  rejected: "rejected on fork",
+  verified: "passed on its fork",
+  rejected: "rejected on its fork",
 };
 
-export default function Timeline({ fault, location, trace, servedKw, totalKw }: Props) {
+export default function Timeline({ fault, location, trace }: Props) {
   return (
     <aside className="card timeline">
-      <h2>Incident</h2>
-      <div className="metric">
-        <span className="muted">Load served</span>
-        <b>
-          {Math.round(servedKw)} / {Math.round(totalKw)} kW
-        </b>
+      <div className="card-head">
+        <h2>Decision trace</h2>
+        {trace && <span className="muted small">{trace.incident.id}</span>}
       </div>
-      {trace && (
-        <div className="metric">
-          <span className="muted">{trace.incident.id}</span>
-          <b>{trace.incident.status}</b>
-        </div>
-      )}
       <ol>
-        {fault && <li>Fault on {fault}; breaker tripped</li>}
+        {fault && (
+          <li className="event fault">
+            <b>Fault on {fault}</b>
+            <div className="muted">breaker 1-2 tripped</div>
+          </li>
+        )}
         {location && (
-          <li>
-            Located Z{location.zone} from indicators {location.chain.join(" → ")}
+          <li className="event">
+            <b>Located Z{location.zone}</b>
+            <div className="muted">indicators {location.chain.join(" → ")}</div>
           </li>
         )}
         {trace?.plans.map((p) => (
-          <li key={p.plan} className={p.status}>
-            <b>{p.plan}</b> {p.kind}, {STATUS_LABEL[p.status] ?? p.status}
-            <div className="muted">{p.ops.join(", ")}</div>
+          <li key={p.plan} className={`event ${p.status}`}>
+            <b>{p.plan}</b>
+            <div className="muted">{p.kind}, {STATUS_LABEL[p.status] ?? p.status}</div>
+            <div className="muted small">{p.ops.join(", ")}</div>
           </li>
         ))}
       </ol>
-      {!fault && !trace && <p className="muted">Click any line segment to fault it.</p>}
     </aside>
   );
 }

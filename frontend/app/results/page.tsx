@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import ResultsChart from "@/components/ResultsChart";
+import TopBar from "@/components/TopBar";
 import { api, type Results } from "@/lib/api";
 
 export default function ResultsPage() {
@@ -19,19 +19,16 @@ export default function ResultsPage() {
 
   return (
     <main>
-      <header>
-        <h1>GridMend</h1>
-        <nav>
-          <Link href="/">Feeder</Link>
-          <Link href="/results" className="active">Results</Link>
-        </nav>
-      </header>
+      <TopBar page="results" />
       {error && <p className="error">{error}</p>}
 
       {results && (
         <>
           <section className="card">
-            <h2>All 23 single faults</h2>
+            <div className="card-head">
+              <h2>All 23 single faults</h2>
+              <span className="muted small">IEEE 33-bus feeder, every unswitched segment faulted in turn</span>
+            </div>
             <table>
               <thead>
                 <tr>
