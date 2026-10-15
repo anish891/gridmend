@@ -115,6 +115,20 @@ def cmd_fault(args: argparse.Namespace) -> int:
     return cmd_status(args)
 
 
+def cmd_locate(args: argparse.Namespace) -> int:
+    from gridmend.flisr.locate import LocateError, locate_fault
+    from gridmend.grid.load import LIVE_GRAPH
+
+    try:
+        location = locate_fault(db.connect().select_graph(LIVE_GRAPH))
+    except LocateError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"faulted zone: Z{location.zone}")
+    print(f"evidence:     {' -> '.join(location.chain)} (all set; downstream clear)")
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     from gridmend.sim import reset
 
@@ -147,6 +161,9 @@ def build_parser() -> argparse.ArgumentParser:
     fault.set_defaults(func=cmd_fault)
 
     sub.add_parser("reset", help="restore grid_live from grid_base").set_defaults(func=cmd_reset)
+    sub.add_parser("locate", help="locate the faulted zone from indicators").set_defaults(
+        func=cmd_locate
+    )
 
     return parser
 
