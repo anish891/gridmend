@@ -16,9 +16,9 @@ any restoration can be explained afterwards, path by path.
   docker run --rm -p 7860:7860 ghcr.io/anish891/gridmend
   ```
 
-* **Live demo:** _add your Render URL here_. It runs on Render's free tier (0.1 CPU), so it
-  sleeps when idle, takes about a minute to wake, and planning takes about a minute instead of
-  two seconds.
+* **Live demo:** https://gridmend.onrender.com. It runs on Render's free tier (0.1 CPU), so it
+  sleeps when idle, takes about a minute to wake, and generating and verifying plans takes about
+  45 seconds there instead of two seconds locally.
 
 Click a line to fault it, then approve a plan.
 
