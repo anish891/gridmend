@@ -335,6 +335,13 @@ def cmd_agent(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mcp(args: argparse.Namespace) -> int:
+    from gridmend.agent.mcp_server import serve
+
+    serve()
+    return 0
+
+
 def cmd_eval(args: argparse.Namespace) -> int:
     from eval.run import markdown, run_all, run_llm_only, summarize, write_outputs
 
@@ -414,6 +421,10 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("line")
     agent.add_argument("--auto", action="store_true", help="approve the agent's plan without asking")
     agent.set_defaults(func=cmd_agent)
+
+    sub.add_parser("mcp", help="serve the agent tools over MCP (stdio)").set_defaults(
+        func=cmd_mcp
+    )
 
     return parser
 
