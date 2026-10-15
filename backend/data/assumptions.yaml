@@ -1,0 +1,38 @@
+# Synthetic operating assumptions layered on the IEEE 33-bus feeder.
+# Bus numbers and line ids use IEEE numbering (1-33), lines as "low-high".
+
+substation: 1
+breaker: "1-2"
+
+sectionalizers:
+  - "2-3"
+  - "6-7"
+  - "9-10"
+  - "13-14"
+  - "2-19"
+  - "3-23"
+  - "6-26"
+  - "29-30"
+
+# Ties are taken from the case data: the lines it stores out of service.
+
+critical_loads:
+  7: hospital
+  15: fire station
+  24: water pumping
+  30: telecom
+
+weights:
+  critical: 10
+  default: 1
+
+# Trunk = consecutive buses on the main feeder 1-18. Everything else
+# (laterals and ties) gets the lateral rating.
+main_feeder_end: 18
+
+# Tuned against summed load kVA:
+# - base case: 6-26 carries Z26+Z30 = 1322 kVA, 2-3 carries 3863 kVA
+# - fault in Z3: 2-19 can carry Z19+Z7 (904) but not Z19+Z7+Z10+Z14 (1584)
+ratings_kva:
+  trunk: 5000
+  lateral: 1400

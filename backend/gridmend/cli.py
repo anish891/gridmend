@@ -27,6 +27,18 @@ def cmd_basecase(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_load(args: argparse.Namespace) -> int:
+    from gridmend.grid.load import BASE_GRAPH, LIVE_GRAPH, write_graph
+
+    summary = write_graph(db.connect())
+    sw = summary["sw"]
+    print(f"wrote {BASE_GRAPH} and {LIVE_GRAPH}")
+    print(f"buses: {summary['buses']}")
+    print(f"SEG:   {summary['seg']}")
+    print(f"SW:    {sum(sw.values())} ({', '.join(f'{n} {k}' for k, n in sw.items())})")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gridmend")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -35,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("basecase", help="run the IEEE 33-bus base power flow").set_defaults(
         func=cmd_basecase
     )
+    sub.add_parser("load", help="write the feeder into FalkorDB").set_defaults(func=cmd_load)
 
     return parser
 
