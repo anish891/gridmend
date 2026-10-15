@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from gridmend import db
 
@@ -349,6 +350,15 @@ def cmd_api(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from gridmend.site import create_site
+
+    uvicorn.run(create_site(Path(args.ui)), host=args.host, port=args.port)
+    return 0
+
+
 def cmd_eval(args: argparse.Namespace) -> int:
     from eval.run import markdown, run_all, run_llm_only, summarize, write_outputs
 
@@ -437,6 +447,12 @@ def build_parser() -> argparse.ArgumentParser:
     api.add_argument("--host", default="127.0.0.1")
     api.add_argument("--port", type=int, default=8000)
     api.set_defaults(func=cmd_api)
+
+    serve = sub.add_parser("serve", help="serve the API under /api and the built UI at /")
+    serve.add_argument("--ui", required=True, help="directory of the exported frontend")
+    serve.add_argument("--host", default="0.0.0.0")
+    serve.add_argument("--port", type=int, default=7860)
+    serve.set_defaults(func=cmd_serve)
 
     return parser
 

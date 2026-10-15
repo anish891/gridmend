@@ -1,0 +1,13 @@
+.git
+.claude
+.env
+CLAUDE.md
+RUN_LOCAL.md
+**/__pycache__
+**/*.egg-info
+backend/.venv
+backend/.pytest_cache
+backend/eval/out
+frontend/node_modules
+frontend/.next
+frontend/out
