@@ -152,6 +152,49 @@ def cmd_isolate(args: argparse.Namespace) -> int:
     return cmd_status(args)
 
 
+def parse_ops(close: str, open_: str) -> list:
+    from gridmend.flisr.trace import SwitchOp
+
+    def ids(arg: str) -> list[str]:
+        return [s.strip() for s in arg.split(",") if s.strip()]
+
+    return [SwitchOp(s, "open") for s in ids(open_)] + [SwitchOp(s, "close") for s in ids(close)]
+
+
+def print_verify(result) -> None:
+    verdict = "PASS" if result.passed else "REJECTED"
+    ops = ", ".join(f"{o.op} {o.switch_id}" for o in result.ops)
+    print(f"plan {result.plan_id}: {ops} -> {verdict} (verified on fork_{result.plan_id})")
+    print(f"  claims:   {zone_list(result.claims)}")
+    print(f"  restores: {zone_list(result.restored_zones)} "
+          f"(net {result.restored_kw:.0f} kW, weighted {result.restored_weighted:.0f})")
+    if result.dropped_zones:
+        print(f"  drops:    {zone_list(result.dropped_zones)} (were energized)")
+    for kind, detail in result.violations:
+        print(f"  violation [{kind}]: {detail}")
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    from gridmend.flisr.trace import open_incident
+    from gridmend.flisr.verify import next_plan_id, verify_plan
+    from gridmend.grid.load import LIVE_GRAPH
+
+    conn = db.connect()
+    g = conn.select_graph(LIVE_GRAPH)
+    incident = open_incident(g)
+    if not incident or incident["status"] != "isolated":
+        print("no isolated incident; run fault and isolate first", file=sys.stderr)
+        return 1
+    ops = parse_ops(args.close, args.open)
+    if not ops:
+        print("nothing to verify; pass --close and/or --open", file=sys.stderr)
+        return 1
+
+    result = verify_plan(conn, g, incident["id"], next_plan_id(g, incident["id"], "v"), ops)
+    print_verify(result)
+    return 0 if result.passed else 2
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     from gridmend.sim import reset
 
@@ -190,6 +233,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("isolate", help="isolate the faulted zone and record the incident").set_defaults(
         func=cmd_isolate
     )
+
+    verify = sub.add_parser("verify", help="verify a switching plan on a forked graph")
+    verify.add_argument("--close", default="", help="comma-separated switch ids to close")
+    verify.add_argument("--open", default="", help="comma-separated switch ids to open")
+    verify.set_defaults(func=cmd_verify)
 
     return parser
 
