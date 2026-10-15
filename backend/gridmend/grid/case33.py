@@ -20,6 +20,18 @@ def load_network() -> pandapowerNet:
     return pn.case33bw()
 
 
+def bus_voltages(conducting: set[str]) -> dict[int, float]:
+    """Run a power flow with exactly the given line ids in service; pu voltage per fed bus."""
+    net = load_network()
+    net.line["in_service"] = [
+        line_id(f, t) in conducting for f, t in zip(net.line.from_bus, net.line.to_bus)
+    ]
+    pp.runpp(net, numba=False)
+    # Buses cut off from the source come back as NaN.
+    vm = net.res_bus.vm_pu.dropna()
+    return {ieee_bus(i): float(v) for i, v in vm.items()}
+
+
 @dataclass(frozen=True)
 class BaseCase:
     buses: int

@@ -1,9 +1,12 @@
 from dataclasses import dataclass, field
 
+import pandapower as pp
 from falkordb import FalkorDB, Graph
 
 from gridmend.flisr.trace import SwitchOp, record_plan
+from gridmend.grid.case33 import bus_voltages
 from gridmend.grid.energize import apply_switch_ops
+from gridmend.grid.load import load_assumptions
 
 
 @dataclass
@@ -17,6 +20,7 @@ class VerifyResult:
     restored_kw: float = 0.0
     restored_weighted: float = 0.0
     max_loading_pct: float | None = None
+    min_v_pu: float | None = None
 
     @property
     def passed(self) -> bool:
@@ -106,6 +110,32 @@ def check_capacity(fork: Graph) -> tuple[list[tuple[str, str]], float]:
     return violations, max_loading
 
 
+def check_voltage(fork: Graph) -> tuple[list[tuple[str, str]], float | None]:
+    """Power flow over the fork's switch configuration; returns violations and the lowest voltage."""
+    conducting = {
+        row[0] for row in fork.ro_query(
+            """
+            MATCH ()-[r:SEG|SW]->()
+            WHERE type(r) = 'SEG' OR r.status = 'closed'
+            RETURN r.id
+            """
+        ).result_set
+    }
+    try:
+        voltages = bus_voltages(conducting)
+    except pp.LoadflowNotConverged:
+        return [("voltage", "power flow did not converge")], None
+
+    limit = load_assumptions()["voltage_min_pu"]
+    min_v, min_bus = min((v, bus) for bus, v in voltages.items())
+    low = sorted(bus for bus, v in voltages.items() if v < limit)
+    if not low:
+        return [], min_v
+    detail = (f"{len(low)} buses below {limit:.2f} pu ({', '.join(map(str, low))}); "
+              f"lowest bus {min_bus} at {min_v:.3f} pu")
+    return [("voltage", detail)], min_v
+
+
 def net_restored_load(fork: Graph, gained: list[int], lost: list[int]) -> tuple[float, float]:
     # Zones a plan darkens that were live before count against it.
     row = fork.ro_query(
@@ -142,7 +172,8 @@ def verify_plan(
         result.violations += radiality
         if not radiality:
             capacity, result.max_loading_pct = check_capacity(fork)
-            result.violations += capacity
+            voltage, result.min_v_pu = check_voltage(fork)
+            result.violations += capacity + voltage
         after = energized_zones(fork)
         result.restored_zones = sorted(after - before)
         result.dropped_zones = sorted(before - after)
@@ -163,7 +194,7 @@ def record_verification(live: Graph, result: VerifyResult) -> None:
         """
         MATCH (p:Plan {id: $id})
         SET p.restored_kw = $kw, p.restored_weighted = $weighted,
-            p.max_loading_pct = $max_loading
+            p.max_loading_pct = $max_loading, p.min_v_pu = $min_v
         WITH p
         UNWIND $violations AS v
         CREATE (p)-[:VIOLATES]->(:Violation {type: v[0], detail: v[1]})
@@ -173,6 +204,7 @@ def record_verification(live: Graph, result: VerifyResult) -> None:
             "kw": result.restored_kw,
             "weighted": result.restored_weighted,
             "max_loading": result.max_loading_pct,
+            "min_v": result.min_v_pu,
             "violations": [list(v) for v in result.violations],
         },
     )

@@ -4,6 +4,7 @@ from gridmend.flisr.isolate import isolate
 from gridmend.flisr.locate import locate_fault
 from gridmend.flisr.trace import SwitchOp
 from gridmend.flisr.verify import check_capacity, energized_zones, verify_plan
+from gridmend.grid.case33 import bus_voltages
 from gridmend.sim import apply_fault
 
 
@@ -96,3 +97,31 @@ def test_violations_are_stored_on_the_plan(z3_isolated):
         "MATCH (:Plan {id: 't10'})-[:VIOLATES]->(v:Violation) RETURN v.type, v.detail"
     ).result_set
     assert ["capacity", "2-19 carries 1584 kVA of 1400 kVA (113%)"] in stored
+
+
+def test_feeding_z30_from_the_main_feeder_end_is_voltage_limited(falkordb, graph):
+    apply_fault(graph, "27-28")
+    locate_fault(graph)
+    incident_id, _ = isolate(graph)
+
+    result = verify_plan(falkordb, graph, incident_id, "t11", [SwitchOp("18-33", "close")])
+    assert kinds(result) == ["voltage"]
+    assert result.min_v_pu < 0.90
+    assert "lowest bus 30" in result.violations[0][1]
+
+
+def test_passing_plans_report_min_voltage(z3_isolated):
+    result = verify(z3_isolated, "t12", closes=["8-21"], opens=["9-10"])
+    assert result.passed
+    assert 0.90 <= result.min_v_pu < 1.0
+
+
+def test_power_flow_matches_base_case_when_all_normal_lines_conduct(graph):
+    conducting = {
+        row[0] for row in graph.ro_query(
+            "MATCH ()-[r:SEG|SW]->() WHERE type(r) = 'SEG' OR r.status = 'closed' RETURN r.id"
+        ).result_set
+    }
+    voltages = bus_voltages(conducting)
+    assert len(voltages) == 33
+    assert min(voltages.values()) == pytest.approx(0.9131, abs=1e-3)

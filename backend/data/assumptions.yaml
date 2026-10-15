@@ -36,3 +36,6 @@ main_feeder_end: 18
 ratings_kva:
   trunk: 5000
   lateral: 1400
+
+# Lowest acceptable voltage at any energized bus after restoration.
+voltage_min_pu: 0.90
