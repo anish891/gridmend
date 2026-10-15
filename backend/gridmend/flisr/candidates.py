@@ -39,6 +39,14 @@ class Situation:
     tie_feeds: list[tuple[int, str]]
 
 
+TIE_FEEDS_QUERY = """
+MATCH (d:Zone {energized: false, faulted: false})-[b:BOUNDARY {kind: 'tie'}]-
+      (:Zone {energized: true, faulted: false})
+RETURN d.id AS dead_zone, b.switch_id AS tie
+ORDER BY d.weighted_kw DESC, b.switch_id
+"""
+
+
 def read_situation(g: Graph) -> Situation:
     closed = {row[0] for row in g.ro_query(
         "MATCH ()-[s:SW {status: 'closed'}]->() RETURN s.id"
@@ -59,14 +67,7 @@ def read_situation(g: Graph) -> Situation:
         """
     ).result_set
     # Dead healthy zones that a tie connects straight to a live zone, heaviest first.
-    tie_feeds = g.ro_query(
-        """
-        MATCH (d:Zone {energized: false, faulted: false})-[b:BOUNDARY {kind: 'tie'}]-
-              (:Zone {energized: true, faulted: false})
-        RETURN d.id, b.switch_id
-        ORDER BY d.weighted_kw DESC, b.switch_id
-        """
-    ).result_set
+    tie_feeds = g.ro_query(TIE_FEEDS_QUERY).result_set
     return Situation(
         closed=frozenset(closed),
         live_zones=frozenset(z for z, on, _, _ in zones if on),

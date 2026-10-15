@@ -1,13 +1,15 @@
 "use client";
 
-import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
+import cytoscape, { type Core, type EdgeSingular, type ElementDefinition } from "cytoscape";
 import { useEffect, useRef, useState } from "react";
 
 import type { GridState, Line, SwitchOp } from "@/lib/api";
 import { BUS_POSITIONS, CURVED_TIES } from "@/lib/layout";
+import type { Problems } from "@/lib/overlay";
 
 const COLORS = {
   live: "#1e8e4e",
+  fresh: "#3ccf7a",
   dark: "#b0b6bd",
   faulted: "#d93025",
   switchBorder: "#1f2328",
@@ -16,6 +18,8 @@ const COLORS = {
   close: "#1a73e8",
   open: "#9334e6",
 };
+
+export type Pulse = { ids: string[]; kind: "fi" | "open" | "close" | "fault"; key: number };
 
 type Tooltip = { x: number; y: number; title: string; lines: string[] };
 
@@ -91,7 +95,7 @@ export function toElements(state: GridState): ElementDefinition[] {
       const live = energized.get(line.from) && energized.get(line.to);
       elements.push({
         group: "edges",
-        data: { id: `l${line.id}`, source: from, target: to, line: line.id, kind: "line", ref: line.id },
+        data: { id: `l${line.id}`, source: from, target: to, kind: "line", ref: line.id },
         classes: ["segment", line.faulted ? "faulted" : live ? "live" : "dark"].join(" "),
       });
       continue;
@@ -101,7 +105,7 @@ export function toElements(state: GridState): ElementDefinition[] {
     const sw = `s${line.id}`;
     elements.push({
       group: "nodes",
-      data: { id: sw, label: line.id, line: line.id, kind: "line", ref: line.id },
+      data: { id: sw, label: line.id, kind: "line", ref: line.id },
       position: { x, y },
       classes: `switch ${line.kind} ${line.status} fi-${line.fi}`,
     });
@@ -110,12 +114,36 @@ export function toElements(state: GridState): ElementDefinition[] {
       const live = line.status === "closed" && energized.get(busId);
       elements.push({
         group: "edges",
-        data: { id: `${sw}-${side}`, source: bus, target: sw, line: line.id },
+        data: { id: `${sw}-${side}`, source: bus, target: sw, kind: "line", ref: line.id },
         classes: [line.kind, live ? "live" : "dark"].join(" "),
       });
     }
   }
   return elements;
+}
+
+// Walk outward from the substation over live edges and add a moving-dash overlay to each
+// one, oriented the way power actually flows (ties can carry it either way).
+function addFlowOverlay(graph: Core): void {
+  const visited = new Set(["b1"]);
+  const queue = ["b1"];
+  const overlays: ElementDefinition[] = [];
+  while (queue.length) {
+    const id = queue.shift()!;
+    graph.getElementById(id).connectedEdges(".live").forEach((edge: EdgeSingular) => {
+      const forward = edge.source().id() === id;
+      const next = forward ? edge.target().id() : edge.source().id();
+      if (visited.has(next)) return;
+      visited.add(next);
+      queue.push(next);
+      overlays.push({
+        group: "edges",
+        data: { id: `flow-${edge.id()}`, source: id, target: next },
+        classes: "flow",
+      });
+    });
+  }
+  graph.add(overlays);
 }
 
 const STYLE: cytoscape.StylesheetJson = [
@@ -130,6 +158,8 @@ const STYLE: cytoscape.StylesheetJson = [
       color: COLORS.label,
       "text-valign": "bottom",
       "text-margin-y": 4,
+      "transition-property": "width, height, border-width, border-color, background-color",
+      "transition-duration": 0.35,
     },
   },
   { selector: "node.live", style: { "background-color": COLORS.live } },
@@ -159,11 +189,40 @@ const STYLE: cytoscape.StylesheetJson = [
   { selector: "node.switch.fi-set", style: { "border-color": COLORS.fi, "border-width": 3 } },
   {
     selector: "edge",
-    style: { width: 3, "line-color": COLORS.dark, "curve-style": "straight" },
+    style: {
+      width: 3,
+      "line-color": COLORS.dark,
+      "curve-style": "straight",
+      "transition-property": "width, line-color",
+      "transition-duration": 0.5,
+    },
   },
   { selector: "edge.live", style: { "line-color": COLORS.live } },
   { selector: "edge.faulted", style: { "line-color": COLORS.faulted, width: 5 } },
   { selector: "edge.tie", style: { "line-style": "dashed", width: 2 } },
+  { selector: "edge.tie.live", style: { "line-style": "solid", width: 3 } },
+  // Moving dashes on top of live lines: power flowing away from the substation.
+  {
+    selector: "edge.flow",
+    style: {
+      width: 1.6,
+      "line-color": "#ffffff",
+      "line-opacity": 0.85,
+      "line-style": "dashed",
+      "line-dash-pattern": [5, 9],
+      events: "no",
+      "transition-duration": 0,
+    },
+  },
+  // Lines that just came back: a brief bright glow.
+  { selector: "edge.fresh", style: { width: 8, "line-color": COLORS.fresh } },
+  { selector: "node.fresh", style: { width: 20, height: 20 } },
+  { selector: "node.critical.fresh", style: { width: 34, height: 34 } },
+  // Step-by-step replay.
+  { selector: "node.pulse-fi", style: { "border-color": COLORS.fi, "border-width": 6, width: 22, height: 22 } },
+  { selector: "node.pulse-open", style: { "border-color": COLORS.open, "border-width": 6, width: 22, height: 22 } },
+  { selector: "node.pulse-close", style: { "border-color": COLORS.close, "border-width": 6, width: 22, height: 22 } },
+  { selector: "edge.pulse-fault", style: { width: 10, "line-color": COLORS.faulted } },
   // A candidate plan under review: switches it would close or open.
   {
     selector: "node.switch.to-close",
@@ -173,6 +232,27 @@ const STYLE: cytoscape.StylesheetJson = [
     selector: "node.switch.to-open",
     style: { "border-color": COLORS.open, "border-width": 4, width: 15, height: 15 },
   },
+  // Why a candidate was rejected.
+  {
+    selector: "edge.problem",
+    style: {
+      width: 7,
+      "line-color": COLORS.faulted,
+      "line-style": "solid",
+      label: "data(problem)",
+      "font-size": 11,
+      "font-weight": "bold",
+      color: COLORS.faulted,
+      "text-background-color": "#ffffff",
+      "text-background-opacity": 0.9,
+      "text-background-padding": "2px",
+    },
+  },
+  {
+    selector: "node.problem",
+    style: { "border-color": COLORS.faulted, "border-width": 4, width: 18, height: 18 },
+  },
+  { selector: "node.low-v", style: { "border-color": COLORS.faulted, "border-width": 3 } },
   { selector: "edge.segment.hover", style: { width: 7 } },
 ];
 
@@ -180,20 +260,26 @@ type Props = {
   state: GridState;
   onSegmentClick?: (lineId: string) => void;
   highlight?: SwitchOp[];
+  pulse?: Pulse | null;
+  problems?: Problems | null;
 };
 
-export default function FeederDiagram({ state, onSegmentClick, highlight = [] }: Props) {
+const reducedMotion = () =>
+  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+export default function FeederDiagram({ state, onSegmentClick, highlight = [], pulse, problems }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
-  // Elements are rebuilt on every state change, so the tap handler reads the latest callback.
+  // Elements are rebuilt on every state change, so handlers read the latest values.
   const onClick = useRef(onSegmentClick);
   onClick.current = onSegmentClick;
   const latest = useRef(state);
   latest.current = state;
+  const liveBefore = useRef<Set<string> | null>(null);
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
 
   useEffect(() => {
-    cy.current = cytoscape({
+    const graph = cytoscape({
       container: container.current,
       style: STYLE,
       layout: { name: "preset" },
@@ -202,33 +288,46 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [] }:
       minZoom: 0.3,
       maxZoom: 3,
     });
-    cy.current.on("tap", "edge.segment", (event) => onClick.current?.(event.target.data("line")));
-    cy.current.on("mouseover", "edge.segment", (event) => {
+    cy.current = graph;
+    graph.on("tap", "edge.segment", (event) => onClick.current?.(event.target.data("ref")));
+    graph.on("mouseover", "edge.segment", (event) => {
       if (!onClick.current) return;
       event.target.addClass("hover");
       container.current!.style.cursor = "pointer";
     });
-    cy.current.on("mouseout", "edge.segment", (event) => {
+    graph.on("mouseout", "edge.segment", (event) => {
       event.target.removeClass("hover");
       container.current!.style.cursor = "default";
     });
-    cy.current.on("mouseover", "node, edge", (event) => {
+    graph.on("mouseover", "node, edge[kind]", (event) => {
       const { x, y } = event.renderedPosition ?? event.target.renderedPosition();
       const info = describe(latest.current, event.target.data("kind"), event.target.data("ref"),
         Boolean(onClick.current));
       setTooltip({ x, y, ...info });
     });
-    cy.current.on("mouseout", "node, edge", () => setTooltip(null));
-    cy.current.on("viewport", () => setTooltip(null));
+    graph.on("mouseout", "node, edge", () => setTooltip(null));
+    graph.on("viewport", () => setTooltip(null));
+
     // The container's size settles after mount and changes with the window, so refit.
     const observer = new ResizeObserver(() => {
-      cy.current?.resize();
-      cy.current?.fit(undefined, 30);
+      graph.resize();
+      graph.fit(undefined, 30);
     });
     observer.observe(container.current!);
+
+    let frame = 0;
+    let offset = 0;
+    const animate = () => {
+      offset = (offset + 0.6) % 1400;
+      graph.edges(".flow").style("line-dash-offset", -offset);
+      frame = requestAnimationFrame(animate);
+    };
+    if (!reducedMotion()) frame = requestAnimationFrame(animate);
+
     return () => {
+      cancelAnimationFrame(frame);
       observer.disconnect();
-      cy.current?.destroy();
+      graph.destroy();
     };
   }, []);
 
@@ -238,10 +337,19 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [] }:
     const first = graph.elements().empty();
     graph.elements().remove();
     graph.add(toElements(state));
+    addFlowOverlay(graph);
     if (first) {
       graph.resize();
       graph.fit(undefined, 30);
     }
+
+    // Anything live now that was dark before glows briefly as power returns.
+    const live = new Set(graph.elements(".live").map((e) => e.id()));
+    if (liveBefore.current) {
+      const fresh = graph.elements(".live").filter((e) => !liveBefore.current!.has(e.id()));
+      fresh.flashClass("fresh", 1600);
+    }
+    liveBefore.current = live;
   }, [state]);
 
   useEffect(() => {
@@ -252,6 +360,28 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [] }:
       graph.getElementById(`s${op.switch_id}`).addClass(op.op === "close" ? "to-close" : "to-open");
     }
   }, [state, highlight]);
+
+  useEffect(() => {
+    const graph = cy.current;
+    if (!graph || !pulse) return;
+    for (const id of pulse.ids) {
+      const target = pulse.kind === "fault" ? graph.getElementById(`l${id}`) : graph.getElementById(`s${id}`);
+      target.flashClass(`pulse-${pulse.kind}`, 900);
+    }
+  }, [pulse]);
+
+  useEffect(() => {
+    const graph = cy.current;
+    if (!graph) return;
+    graph.elements(".problem, .low-v").removeClass("problem low-v").removeData("problem");
+    if (!problems) return;
+    for (const line of problems.lines) {
+      const parts = graph.elements(`#l${line.id}, #s${line.id}, #s${line.id}-a, #s${line.id}-b`);
+      parts.addClass("problem");
+      if (line.label) parts.edges().first().data("problem", line.label);
+    }
+    for (const bus of problems.buses) graph.getElementById(`b${bus}`).addClass("low-v");
+  }, [state, problems]);
 
   return (
     <div className="diagram-wrap">

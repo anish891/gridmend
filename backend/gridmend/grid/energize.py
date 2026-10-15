@@ -5,7 +5,7 @@ ENERGIZED_QUERY = """
 MATCH (s:Bus {is_source: true})
 MATCH p = (s)-[:SEG|SW*0..40]-(b:Bus)
 WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
-RETURN DISTINCT b.id
+RETURN DISTINCT b.id AS bus
 """
 
 

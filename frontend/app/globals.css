@@ -419,6 +419,13 @@ button.secondary {
 .box.to-close { border-color: var(--close); border-width: 3px; }
 .box.to-open { border-color: var(--open); border-width: 3px; }
 
+.problem-mark {
+  width: 18px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--faulted);
+}
+
 .dash {
   width: 20px;
   border-top: 2px dashed var(--dark);
@@ -760,4 +767,86 @@ td.bad { color: var(--faulted); }
   .step-label { font-size: 12px; }
   .candidates { grid-template-columns: minmax(0, 1fr); }
   .diagram { height: 240px; }
+}
+
+/* Graph page */
+
+.intro-graph p { margin: 6px 0 0; }
+
+.intro-graph code,
+.query code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.query-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.query p { margin: 6px 0 10px; }
+
+.step-chip {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  background: #e8f1fb;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.query-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.cypher {
+  margin: 0;
+  background: #f6f8fa;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+  color: #24292f;
+}
+
+.cy-kw { color: #cf222e; font-weight: 600; }
+.cy-fn { color: #8250df; }
+.cy-param { color: #0a7ea4; font-weight: 600; }
+.cy-str { color: #0a3069; }
+.cy-label { color: #116329; }
+
+.params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.param {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: #e8f1fb;
+  color: var(--accent);
+  padding: 1px 8px;
+  border-radius: 6px;
+}
+
+.query-result table td,
+.query-result table th {
+  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.query-result p { margin: 6px 0 0; }
+
+@media (max-width: 900px) {
+  .query-body { grid-template-columns: minmax(0, 1fr); }
 }

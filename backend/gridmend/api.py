@@ -174,6 +174,13 @@ def trace() -> dict:
     return {"incident": incident, "plans": incident_trace(g, incident["id"])}
 
 
+@app.get("/queries")
+def queries() -> dict:
+    from gridmend.showcase import run_steps
+
+    return {"graph": GRAPH_NAME, "steps": run_steps(live())}
+
+
 @app.get("/results")
 def results() -> dict:
     from eval.run import load_results, summarize

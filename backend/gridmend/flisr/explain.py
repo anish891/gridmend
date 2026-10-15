@@ -4,19 +4,19 @@ from gridmend.flisr.candidates import screen
 from gridmend.grid.energize import grid_status
 
 
+# Switches on the conducting path from the substation into a zone, in order.
+FEEDING_PATH_QUERY = """
+MATCH (s:Bus {is_source: true}), (t:Bus {id: $zone})
+MATCH p = (s)-[:SEG|SW*0..40]-(t)
+WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
+RETURN [r IN relationships(p) WHERE type(r) = 'SW' | r.id] AS switches
+ORDER BY length(p)
+LIMIT 1
+"""
+
+
 def feeding_path(g: Graph, zone: int) -> list[str]:
-    """Switches on the conducting path from the substation into a zone, in order."""
-    rows = g.ro_query(
-        """
-        MATCH (s:Bus {is_source: true}), (t:Bus {id: $zone})
-        MATCH p = (s)-[:SEG|SW*0..40]-(t)
-        WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
-        RETURN [r IN relationships(p) WHERE type(r) = 'SW' | r.id]
-        ORDER BY length(p)
-        LIMIT 1
-        """,
-        {"zone": zone},
-    ).result_set
+    rows = g.ro_query(FEEDING_PATH_QUERY, {"zone": zone}).result_set
     return rows[0][0] if rows else []
 
 

@@ -67,14 +67,15 @@ def record_plan(
     )
 
 
+TRACE_QUERY = """
+MATCH (i:Incident {id: $id})-[:HAS_PLAN]->(p:Plan)-[:STEP]->(o:SwitchOp)
+WITH p, o ORDER BY o.seq
+RETURN p.id AS plan, p.kind AS kind, p.status AS status,
+       collect(o.op + ' ' + o.switch_id) AS steps
+ORDER BY p.id
+"""
+
+
 def incident_trace(g: Graph, incident_id: str) -> list[dict]:
-    rows = g.ro_query(
-        """
-        MATCH (i:Incident {id: $id})-[:HAS_PLAN]->(p:Plan)-[:STEP]->(o:SwitchOp)
-        WITH p, o ORDER BY o.seq
-        RETURN p.id, p.kind, p.status, collect(o.op + ' ' + o.switch_id)
-        ORDER BY p.id
-        """,
-        {"id": incident_id},
-    ).result_set
+    rows = g.ro_query(TRACE_QUERY, {"id": incident_id}).result_set
     return [dict(zip(("plan", "kind", "status", "ops"), row)) for row in rows]

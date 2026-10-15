@@ -20,7 +20,9 @@ any restoration can be explained afterwards, path by path.
   sleeps when idle, takes about a minute to wake, and generating and verifying plans takes about
   45 seconds there instead of two seconds locally.
 
-Click a line to fault it, then approve a plan.
+Pick a demo fault (or click a line), watch the indicators, isolation and switching replay on the
+diagram, hover a rejected plan to see why it failed, then approve one that passed. The **Graph**
+tab shows the live Cypher behind every step and what it returns right now.
 
 ![GridMend after a fault on 4-5: hospital and fire station re-fed through ties 8-21 and 9-15](docs/feeder.png)
 
@@ -112,6 +114,8 @@ the two core queries simple: zones are components over `SEG` only, and energizat
 plus closed `SW`.
 
 ## The Cypher the product depends on
+
+![Graph tab: each step's Cypher run live against grid_live](docs/graph.png)
 
 Zones: connected components over unswitched segments
 ([zones.py](backend/gridmend/grid/zones.py)).

@@ -14,6 +14,13 @@ class IsolateError(Exception):
     pass
 
 
+BOUNDARY_QUERY = """
+MATCH (b:Bus)-[:IN_ZONE]->(:Zone {id: $zone}), (b)-[s:SW]-(o:Bus)
+WHERE s.status = 'closed' AND coalesce(o.zone, -1) <> $zone
+RETURN s.id AS switch, endNode(s) = b AS upstream
+"""
+
+
 def faulted_zone(g: Graph) -> int | None:
     rows = g.ro_query("MATCH (z:Zone {faulted: true}) RETURN z.id").result_set
     return rows[0][0] if rows else None
@@ -22,14 +29,7 @@ def faulted_zone(g: Graph) -> int | None:
 def isolation_ops(g: Graph, zone: int) -> list[SwitchOp]:
     # Open every closed switch on the zone's edge, upstream side first, then reclose
     # the breaker so everything upstream of the fault is fed again.
-    rows = g.ro_query(
-        """
-        MATCH (b:Bus)-[:IN_ZONE]->(:Zone {id: $zone}), (b)-[s:SW]-(o:Bus)
-        WHERE s.status = 'closed' AND coalesce(o.zone, -1) <> $zone
-        RETURN s.id, endNode(s) = b AS upstream
-        """,
-        {"zone": zone},
-    ).result_set
+    rows = g.ro_query(BOUNDARY_QUERY, {"zone": zone}).result_set
     boundary = sorted(rows, key=lambda r: (not r[1], [int(x) for x in r[0].split("-")]))
     ops = [SwitchOp(switch_id, "open") for switch_id, _ in boundary]
 

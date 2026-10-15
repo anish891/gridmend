@@ -4,13 +4,16 @@ import { useCallback, useEffect, useState } from "react";
 
 import CandidateList from "@/components/CandidateList";
 import ExplanationPanel from "@/components/ExplanationPanel";
-import FeederDiagram from "@/components/FeederDiagram";
+import FeederDiagram, { type Pulse } from "@/components/FeederDiagram";
 import Intro from "@/components/Intro";
 import StatusStrip from "@/components/StatusStrip";
 import Stepper from "@/components/Stepper";
 import Timeline from "@/components/Timeline";
 import TopBar from "@/components/TopBar";
-import { api, type Explanation, type GridState, type Location, type PlanResult, type Trace } from "@/lib/api";
+import {
+  api, type Explanation, type GridState, type Location, type PlanResult, type SwitchOp, type Trace,
+} from "@/lib/api";
+import { problemsFor, withSwitch } from "@/lib/overlay";
 
 // Short pauses between automatic steps so each one is visible on the diagram.
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -33,6 +36,20 @@ export default function Home() {
   const [executed, setExecuted] = useState<string | null>(null);
   const [trace, setTrace] = useState<Trace | null>(null);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
+  const [pulse, setPulse] = useState<Pulse | null>(null);
+
+  const flash = useCallback((ids: string[], kind: Pulse["kind"]) => {
+    setPulse({ ids, kind, key: Math.random() });
+  }, []);
+
+  // Show switching one operation at a time on the diagram before reading the real state back.
+  const replay = useCallback(async (ops: SwitchOp[]) => {
+    for (const op of ops) {
+      setState((current) => (current ? withSwitch(current, op) : current));
+      flash([op.switch_id], op.op);
+      await pause(550);
+    }
+  }, [flash]);
 
   const working = useCallback((step: number, message: string) => {
     setBusy({ step, message });
@@ -60,18 +77,25 @@ export default function Home() {
         await api.fault(line);
         setFault(line);
         await refresh();
-        await pause(1000);
+        flash([line], "fault");
+        await pause(1100);
       }
       if (from !== "plan") {
         working(STEP.locate, "Following the chain of tripped fault indicators");
-        setLocation(await api.locate());
+        const found = await api.locate();
+        setLocation(found);
+        for (const id of found.chain) {
+          flash([id], "fi");
+          await pause(600);
+        }
         await refresh();
-        await pause(1000);
+        await pause(400);
         working(STEP.isolate, "Opening the faulted zone's boundary switches and reclosing the breaker");
-        await api.isolate();
+        const isolation = await api.isolate();
+        await replay(isolation.ops);
         await refresh();
         setTrace(await api.trace());
-        await pause(700);
+        await pause(900);
       }
       working(STEP.verify, "Generating restoration plans and verifying each one on a forked graph");
       const result = await api.plan();
@@ -83,15 +107,16 @@ export default function Home() {
     } finally {
       setBusy(null);
     }
-  }, [refresh, working]);
+  }, [refresh, working, flash, replay]);
 
   const approve = useCallback(async (planId: string) => {
     setError(null);
     working(STEP.approve, `Executing ${planId} on the live graph`);
     try {
-      await api.execute(planId);
+      const execution = await api.execute(planId);
       setExecuted(planId);
       setSelected(null);
+      await replay(execution.ops);
       await refresh();
       setTrace(await api.trace());
       setExplanation(await api.explain());
@@ -100,7 +125,7 @@ export default function Home() {
     } finally {
       setBusy(null);
     }
-  }, [refresh, working]);
+  }, [refresh, working, replay]);
 
   const resetGrid = useCallback(async () => {
     setError(null);
@@ -136,7 +161,9 @@ export default function Home() {
 
   const healthy = state !== null && !state.incident && !state.lines.some((l) => l.faulted);
   const status = state?.incident?.status;
-  const highlight = plan?.candidates.find((c) => c.plan_id === selected)?.ops ?? [];
+  const reviewed = plan?.candidates.find((c) => c.plan_id === selected);
+  const highlight = reviewed?.ops ?? [];
+  const problems = reviewed && state ? problemsFor(reviewed, state) : null;
   const nothingPassed = plan !== null && !plan.candidates.some((c) => c.passed);
 
   // How far the incident has got, for the stepper.
@@ -182,6 +209,8 @@ export default function Home() {
             <FeederDiagram
               state={state}
               highlight={highlight}
+              pulse={pulse}
+              problems={problems}
               onSegmentClick={healthy && !busy ? (line) => run("fault", line) : undefined}
             />
           )}
@@ -195,6 +224,7 @@ export default function Home() {
             <li><span className="box fi" /> indicator set</li>
             <li><span className="box to-close" /> plan closes</li>
             <li><span className="box to-open" /> plan opens</li>
+            <li><span className="problem-mark" /> why rejected</li>
             <li><span className="star">★</span> critical load</li>
           </ul>
         </section>
@@ -211,7 +241,8 @@ export default function Home() {
           <div className="card-head">
             <h2>Restoration candidates</h2>
             <span className="muted small">
-              ranked by weighted restored load; each one checked on its own copy of the graph
+              ranked by weighted restored load; each checked on its own copy of the graph.
+              Hover a rejected plan to see the problem on the diagram
             </span>
           </div>
           {plan.candidates.length === 0 ? (

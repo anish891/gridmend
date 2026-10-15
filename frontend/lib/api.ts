@@ -117,6 +117,21 @@ export type MethodSummary = {
 
 export type Results = { summary: MethodSummary[]; rows: ResultRow[] };
 
+export type QueryStep = {
+  key: string;
+  step: string;
+  title: string;
+  purpose: string;
+  cypher: string;
+  params: Record<string, unknown>;
+  skipped?: string;
+  when_empty?: string | null;
+  ms?: number;
+  columns?: string[];
+  rows?: unknown[][];
+  total_rows?: number;
+};
+
 async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     method,
@@ -139,5 +154,6 @@ export const api = {
   explain: () => call<Explanation>("GET", "/explain"),
   trace: () => call<Trace>("GET", "/trace"),
   results: () => call<Results>("GET", "/results"),
+  queries: () => call<{ graph: string; steps: QueryStep[] }>("GET", "/queries"),
   reset: () => call<{ ok: boolean }>("POST", "/reset"),
 };

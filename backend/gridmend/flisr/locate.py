@@ -13,20 +13,21 @@ class Location:
     chain: list[str]
 
 
+LOCATE_QUERY = """
+MATCH (:Bus)-[up:SW]->(:Bus)-[:IN_ZONE]->(z:Zone)
+WHERE up.kind <> 'tie' AND up.fi = 'set'
+OPTIONAL MATCH (b:Bus)-[:IN_ZONE]->(z), (b)-[down:SW]->(:Bus)
+WHERE down.kind = 'sectionalizer' AND down.fi = 'set'
+WITH z, count(down) AS set_downstream
+WHERE set_downstream = 0
+RETURN z.id AS faulted_zone
+"""
+
+
 def find_faulted_zone(g: Graph) -> int:
     # The fault sits in the zone whose upstream indicator is set while every
     # downstream indicator is clear: current reached the zone but went no further.
-    rows = g.ro_query(
-        """
-        MATCH (:Bus)-[up:SW]->(:Bus)-[:IN_ZONE]->(z:Zone)
-        WHERE up.kind <> 'tie' AND up.fi = 'set'
-        OPTIONAL MATCH (b:Bus)-[:IN_ZONE]->(z), (b)-[down:SW]->(:Bus)
-        WHERE down.kind = 'sectionalizer' AND down.fi = 'set'
-        WITH z, count(down) AS set_downstream
-        WHERE set_downstream = 0
-        RETURN z.id
-        """
-    ).result_set
+    rows = g.ro_query(LOCATE_QUERY).result_set
     if len(rows) != 1:
         raise LocateError(f"expected one faulted zone, indicators point to {len(rows)}")
     return rows[0][0]

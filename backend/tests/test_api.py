@@ -67,3 +67,18 @@ def test_results_match_the_evaluation_output(client, tmp_path, monkeypatch):
     body = client.get("/results").json()
     assert body["rows"][0]["restored_kw"] == 850.0
     assert body["summary"] == run.summarize(rows)
+
+
+def test_queries_run_live_and_follow_the_incident(client):
+    healthy = {q["key"]: q for q in client.get("/queries").json()["steps"]}
+    assert healthy["zones"]["total_rows"] == 9
+    assert healthy["energize"]["total_rows"] == 33
+    assert "skipped" in healthy["isolate"] and "skipped" in healthy["trace"]
+
+    client.post("/fault", json={"line": "4-5"})
+    client.post("/locate")
+    client.post("/isolate")
+    isolated = {q["key"]: q for q in client.get("/queries").json()["steps"]}
+    assert isolated["isolate"]["params"] == {"zone": 3}
+    assert isolated["options"]["rows"] == [[7, "8-21"], [10, "12-22"]]
+    assert isolated["trace"]["rows"][0][:3] == ["inc1-iso", "isolation", "executed"]

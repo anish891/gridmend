@@ -81,19 +81,20 @@ def check_radiality(fork: Graph) -> list[tuple[str, str]]:
                           f"(a tree has {buses - 1}): the plan closes a loop")]
 
 
+LOADING_QUERY = """
+MATCH (s:Bus {is_source: true})
+MATCH p = (s)-[:SEG|SW*0..40]-(b:Bus {energized: true})
+WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
+UNWIND relationships(p) AS r
+WITH r, sum(b.p_kw) AS p_kw, sum(b.q_kvar) AS q_kvar
+RETURN r.id AS line, sqrt(p_kw * p_kw + q_kvar * q_kvar) AS kva, r.cap_kva AS rating_kva
+"""
+
+
 def edge_loadings(fork: Graph) -> list[tuple[str, float, float]]:
     # In a radial feeder every energized bus has exactly one path from the source, so the
     # load an edge carries is the sum of the loads of the buses whose path runs through it.
-    rows = fork.ro_query(
-        """
-        MATCH (s:Bus {is_source: true})
-        MATCH p = (s)-[:SEG|SW*0..40]-(b:Bus {energized: true})
-        WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
-        UNWIND relationships(p) AS r
-        WITH r, sum(b.p_kw) AS p_kw, sum(b.q_kvar) AS q_kvar
-        RETURN r.id, sqrt(p_kw * p_kw + q_kvar * q_kvar), r.cap_kva
-        """
-    ).result_set
+    rows = fork.ro_query(LOADING_QUERY).result_set
     return [(edge_id, s_kva, cap_kva) for edge_id, s_kva, cap_kva in rows]
 
 

@@ -1,19 +1,20 @@
 from falkordb import Graph
 
 
+ZONES_QUERY = """
+CALL algo.WCC({nodeLabels: ['Bus'], relationshipTypes: ['SEG']})
+YIELD node, componentId
+WITH componentId, collect(node) AS nodes
+WHERE none(n IN nodes WHERE n.is_source)
+RETURN [n IN nodes | n.id] AS buses
+"""
+
+
 def build_zones(g: Graph) -> int:
     # A zone is a connected component over unswitched segments: the smallest isolatable piece.
     g.query("MATCH (z:Zone) DETACH DELETE z")
 
-    components = g.ro_query(
-        """
-        CALL algo.WCC({nodeLabels: ['Bus'], relationshipTypes: ['SEG']})
-        YIELD node, componentId
-        WITH componentId, collect(node) AS nodes
-        WHERE none(n IN nodes WHERE n.is_source)
-        RETURN [n IN nodes | n.id] AS buses
-        """
-    ).result_set
+    components = g.ro_query(ZONES_QUERY).result_set
     zones = [{"id": min(buses), "buses": buses} for (buses,) in components]
 
     g.query(

@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 type Props = {
-  page: "feeder" | "results";
+  page: "feeder" | "graph" | "results";
   children?: React.ReactNode;
 };
 
@@ -19,6 +19,7 @@ export default function TopBar({ page, children }: Props) {
       </div>
       <nav>
         <Link href="/" className={page === "feeder" ? "active" : undefined}>Feeder</Link>
+        <Link href="/graph/" className={page === "graph" ? "active" : undefined}>Graph</Link>
         <Link href="/results/" className={page === "results" ? "active" : undefined}>Results</Link>
       </nav>
       <div className="topbar-actions">{children}</div>
