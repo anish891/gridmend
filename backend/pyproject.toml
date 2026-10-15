@@ -8,16 +8,18 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "falkordb",
+    "fastapi",
     "mcp",
     "networkx",
     "openai",
     "pandapower",
     "python-dotenv",
     "pyyaml",
+    "uvicorn",
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["httpx", "pytest"]
 
 [project.scripts]
 gridmend = "gridmend.cli:main"

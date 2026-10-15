@@ -342,6 +342,13 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_api(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    uvicorn.run("gridmend.api:app", host=args.host, port=args.port)
+    return 0
+
+
 def cmd_eval(args: argparse.Namespace) -> int:
     from eval.run import markdown, run_all, run_llm_only, summarize, write_outputs
 
@@ -425,6 +432,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("mcp", help="serve the agent tools over MCP (stdio)").set_defaults(
         func=cmd_mcp
     )
+
+    api = sub.add_parser("api", help="serve the HTTP API for the UI")
+    api.add_argument("--host", default="127.0.0.1")
+    api.add_argument("--port", type=int, default=8000)
+    api.set_defaults(func=cmd_api)
 
     return parser
 
