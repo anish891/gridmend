@@ -170,6 +170,8 @@ def print_verify(result) -> None:
           f"(net {result.restored_kw:.0f} kW, weighted {result.restored_weighted:.0f})")
     if result.dropped_zones:
         print(f"  drops:    {zone_list(result.dropped_zones)} (were energized)")
+    if result.max_loading_pct is not None:
+        print(f"  max loading: {result.max_loading_pct:.0f}%")
     for kind, detail in result.violations:
         print(f"  violation [{kind}]: {detail}")
 

@@ -16,6 +16,7 @@ class VerifyResult:
     dropped_zones: list[int] = field(default_factory=list)
     restored_kw: float = 0.0
     restored_weighted: float = 0.0
+    max_loading_pct: float | None = None
 
     @property
     def passed(self) -> bool:
@@ -76,8 +77,33 @@ def check_radiality(fork: Graph) -> list[tuple[str, str]]:
                           f"(a tree has {buses - 1}): the plan closes a loop")]
 
 
-def run_checks(fork: Graph, claims: list[int]) -> list[tuple[str, str]]:
-    return check_isolation(fork) + check_connectivity(fork, claims) + check_radiality(fork)
+def edge_loadings(fork: Graph) -> list[tuple[str, float, float]]:
+    # In a radial feeder every energized bus has exactly one path from the source, so the
+    # load an edge carries is the sum of the loads of the buses whose path runs through it.
+    rows = fork.ro_query(
+        """
+        MATCH (s:Bus {is_source: true})
+        MATCH p = (s)-[:SEG|SW*0..40]-(b:Bus {energized: true})
+        WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
+        UNWIND relationships(p) AS r
+        WITH r, sum(b.p_kw) AS p_kw, sum(b.q_kvar) AS q_kvar
+        RETURN r.id, sqrt(p_kw * p_kw + q_kvar * q_kvar), r.cap_kva
+        """
+    ).result_set
+    return [(edge_id, s_kva, cap_kva) for edge_id, s_kva, cap_kva in rows]
+
+
+def check_capacity(fork: Graph) -> tuple[list[tuple[str, str]], float]:
+    """Only meaningful once radiality holds; returns violations and the highest loading in %."""
+    loadings = edge_loadings(fork)
+    violations = [
+        ("capacity", f"{edge_id} carries {s_kva:.0f} kVA of {cap_kva:.0f} kVA "
+                     f"({100 * s_kva / cap_kva:.0f}%)")
+        for edge_id, s_kva, cap_kva in sorted(loadings, key=lambda e: e[1] / e[2], reverse=True)
+        if s_kva > cap_kva
+    ]
+    max_loading = max((100 * s_kva / cap_kva for _, s_kva, cap_kva in loadings), default=0.0)
+    return violations, max_loading
 
 
 def net_restored_load(fork: Graph, gained: list[int], lost: list[int]) -> tuple[float, float]:
@@ -111,7 +137,12 @@ def verify_plan(
     fork = live.copy(fork_name)
     try:
         apply_switch_ops(fork, [(o.switch_id, o.op) for o in ops])
-        result.violations = run_checks(fork, result.claims)
+        result.violations = check_isolation(fork) + check_connectivity(fork, result.claims)
+        radiality = check_radiality(fork)
+        result.violations += radiality
+        if not radiality:
+            capacity, result.max_loading_pct = check_capacity(fork)
+            result.violations += capacity
         after = energized_zones(fork)
         result.restored_zones = sorted(after - before)
         result.dropped_zones = sorted(before - after)
@@ -123,14 +154,28 @@ def verify_plan(
 
     record_plan(live, incident_id, plan_id, "restoration",
                 "verified" if result.passed else "rejected", ops)
+    record_verification(live, result)
+    return result
+
+
+def record_verification(live: Graph, result: VerifyResult) -> None:
     live.query(
         """
         MATCH (p:Plan {id: $id})
-        SET p.restored_kw = $kw, p.restored_weighted = $weighted
+        SET p.restored_kw = $kw, p.restored_weighted = $weighted,
+            p.max_loading_pct = $max_loading
+        WITH p
+        UNWIND $violations AS v
+        CREATE (p)-[:VIOLATES]->(:Violation {type: v[0], detail: v[1]})
         """,
-        {"id": plan_id, "kw": result.restored_kw, "weighted": result.restored_weighted},
+        {
+            "id": result.plan_id,
+            "kw": result.restored_kw,
+            "weighted": result.restored_weighted,
+            "max_loading": result.max_loading_pct,
+            "violations": [list(v) for v in result.violations],
+        },
     )
-    return result
 
 
 def next_plan_id(g: Graph, incident_id: str, prefix: str) -> str:
