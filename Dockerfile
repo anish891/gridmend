@@ -18,12 +18,15 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/python \
 WORKDIR /app
 COPY backend/ backend/
 RUN uv venv -p 3.12 /opt/venv \
-    && uv pip install -p /opt/venv --no-cache -e ./backend \
-    && mkdir -p backend/eval/out \
-    && chmod -R a+rwX backend/eval/out
+    && uv pip install -p /opt/venv --no-cache -e ./backend
+
+# The evaluation needs a running FalkorDB but only takes seconds with build-time CPU,
+# so its results ship in the image instead of being recomputed on a small host.
+COPY deploy/ deploy/
+RUN deploy/falkordb.sh && gridmend load && gridmend eval > /dev/null \
+    && redis-cli shutdown nosave
 
 COPY --from=ui /ui/out /app/ui
-COPY deploy/start.sh /app/start.sh
 
 EXPOSE 7860
-ENTRYPOINT ["/app/start.sh"]
+ENTRYPOINT ["/app/deploy/start.sh"]

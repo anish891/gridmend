@@ -1,4 +1,6 @@
+import copy
 from dataclasses import dataclass
+from functools import cache
 
 import pandapower as pp
 import pandapower.networks as pn
@@ -15,9 +17,15 @@ def line_id(from_pp: int, to_pp: int) -> str:
     return f"{a}-{b}"
 
 
+@cache
+def _base_network() -> pandapowerNet:
+    return pn.case33bw()
+
+
 def load_network() -> pandapowerNet:
     # case33bw stores the 5 ties as out-of-service lines; lengths are 1 km, so ohm/km is ohm.
-    return pn.case33bw()
+    # Building the case is far slower than a power flow on it, so build once and hand out copies.
+    return copy.deepcopy(_base_network())
 
 
 def bus_voltages(conducting: set[str]) -> dict[int, float]:

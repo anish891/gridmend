@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: gridmend
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/state

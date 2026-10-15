@@ -1,12 +1,3 @@
----
-title: GridMend
-colorFrom: green
-colorTo: gray
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # GridMend: a self-healing grid agent on a FalkorDB twin
 
 GridMend restores power after a fault on a distribution feeder. It locates the fault from
@@ -17,7 +8,19 @@ any restoration can be explained afterwards, path by path.
 
 **Track:** 01, Agents That Act on Connected Data.
 
-**Live demo:** _add your Hugging Face Space URL here_ (click a line to fault it, then approve a plan).
+**Try it:**
+
+* **Run the published image** (full speed, needs only Docker), then open http://localhost:7860:
+
+  ```bash
+  docker run --rm -p 7860:7860 ghcr.io/anish891/gridmend
+  ```
+
+* **Live demo:** _add your Render URL here_. It runs on Render's free tier (0.1 CPU), so it
+  sleeps when idle, takes about a minute to wake, and planning takes about a minute instead of
+  two seconds.
+
+Click a line to fault it, then approve a plan.
 
 ![GridMend after a fault on 4-5: hospital and fire station re-fed through ties 8-21 and 9-15](docs/feeder.png)
 
@@ -319,33 +322,24 @@ npx @modelcontextprotocol/inspector "$(which gridmend)" mcp
 ### Single container
 
 The `Dockerfile` builds the UI as static files and runs FalkorDB, the API and the UI in one
-container on port 7860. On start it loads the feeder and runs the evaluation in the background
-for the results page.
+container on port 7860 (or `$PORT`). The evaluation runs during the image build, so the results
+page is ready immediately; on start the container only loads the feeder.
 
 ```bash
 docker build -t gridmend .
-docker run -p 7860:7860 gridmend          # http://localhost:7860
+docker run --rm -p 7860:7860 gridmend      # http://localhost:7860, API under /api
 ```
 
-This is what the live demo runs on Hugging Face Spaces (Docker SDK, free CPU tier).
+A GitHub Action ([image.yml](.github/workflows/image.yml)) publishes this image for amd64 and
+arm64 to `ghcr.io/anish891/gridmend` on every push to `main`.
 
-### Deploy to Hugging Face Spaces
+### Deploy to Render (free)
 
-1. Create a Space at https://huggingface.co/new-space with SDK **Docker**, template **Blank**,
-   hardware **CPU basic (free)**.
-2. Upload the committed files (the YAML header of this README configures the Space):
-
-```bash
-pip install -U huggingface_hub
-hf auth login
-rm -rf /tmp/gridmend-space && mkdir /tmp/gridmend-space
-git archive HEAD | tar -x -C /tmp/gridmend-space
-hf upload <your-username>/gridmend /tmp/gridmend-space . --repo-type space
-```
-
-The Space builds the image (about five minutes) and serves the app at
-`https://<your-username>-gridmend.hf.space`. FalkorDB runs inside the container and the feeder
-is reloaded on every start, so no external database or secrets are needed.
+[render.yaml](render.yaml) describes one free Docker web service. In the Render dashboard choose
+**New > Blueprint**, select this repository and apply. The first build takes several minutes;
+the health check is `GET /api/state`. Nothing else is needed: FalkorDB runs inside the
+container and the feeder is reloaded on every start, so there is no database to provision and
+no secret to set.
 
 ## Data and assumptions
 
