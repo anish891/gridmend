@@ -228,3 +228,23 @@ def write_outputs(rows: list[Row], summary: list[dict]) -> Path:
         writer.writerows(asdict(r) for r in rows)
     (OUT_DIR / "results.md").write_text(markdown(rows, summary))
     return OUT_DIR
+
+
+def load_results() -> list[Row] | None:
+    path = OUT_DIR / "results.csv"
+    if not path.exists():
+        return None
+    with open(path, newline="") as f:
+        return [
+            Row(
+                fault=r["fault"],
+                method=r["method"],
+                restored_kw=float(r["restored_kw"]),
+                critical=int(r["critical"]),
+                switch_ops=int(r["switch_ops"]),
+                violations=int(r["violations"]),
+                plan_ms=float(r["plan_ms"]),
+                optimal_kw=float(r["optimal_kw"]),
+            )
+            for r in csv.DictReader(f)
+        ]

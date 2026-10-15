@@ -1,3 +1,5 @@
+from dataclasses import asdict
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -170,6 +172,16 @@ def trace() -> dict:
     g = live()
     incident = current_incident(g)
     return {"incident": incident, "plans": incident_trace(g, incident["id"])}
+
+
+@app.get("/results")
+def results() -> dict:
+    from eval.run import load_results, summarize
+
+    rows = load_results()
+    if rows is None:
+        raise HTTPException(404, "no evaluation results yet; run `gridmend eval`")
+    return {"summary": summarize(rows), "rows": [asdict(r) for r in rows]}
 
 
 @app.post("/reset")

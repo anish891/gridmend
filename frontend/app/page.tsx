@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import CandidateList from "@/components/CandidateList";
@@ -81,6 +82,26 @@ export default function Home() {
     }
   }, [refresh]);
 
+  const resetGrid = useCallback(async () => {
+    setError(null);
+    setBusy("Resetting the feeder");
+    try {
+      await api.reset();
+      setFault(null);
+      setLocation(null);
+      setPlan(null);
+      setSelected(null);
+      setExecuted(null);
+      setTrace(null);
+      setExplanation(null);
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }, [refresh]);
+
   // Pick up an incident already in progress, e.g. after a page reload.
   useEffect(() => {
     refresh()
@@ -101,7 +122,13 @@ export default function Home() {
     <main>
       <header>
         <h1>GridMend</h1>
-        <span className="muted">self-healing feeder on a FalkorDB twin</span>
+        <nav>
+          <Link href="/" className="active">Feeder</Link>
+          <Link href="/results">Results</Link>
+        </nav>
+        <button className="secondary" disabled={busy !== null || healthy} onClick={resetGrid}>
+          Reset feeder
+        </button>
       </header>
       {error && <p className="error">{error}</p>}
 

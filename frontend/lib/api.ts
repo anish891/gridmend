@@ -93,6 +93,30 @@ export type Trace = {
   plans: { plan: string; kind: string; status: string; ops: string[] }[];
 };
 
+export type ResultRow = {
+  fault: string;
+  method: string;
+  restored_kw: number;
+  critical: number;
+  switch_ops: number;
+  violations: number;
+  plan_ms: number;
+  optimal_kw: number;
+};
+
+export type MethodSummary = {
+  method: string;
+  restored_kw: number;
+  pct_optimal: number;
+  critical: number;
+  switch_ops: number;
+  violations: number;
+  unsafe_plans: number;
+  mean_plan_ms: number;
+};
+
+export type Results = { summary: MethodSummary[]; rows: ResultRow[] };
+
 async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     method,
@@ -114,4 +138,6 @@ export const api = {
   execute: (planId: string) => call<{ plan_id: string; ops: SwitchOp[] }>("POST", "/execute", { plan_id: planId }),
   explain: () => call<Explanation>("GET", "/explain"),
   trace: () => call<Trace>("GET", "/trace"),
+  results: () => call<Results>("GET", "/results"),
+  reset: () => call<{ ok: boolean }>("POST", "/reset"),
 };

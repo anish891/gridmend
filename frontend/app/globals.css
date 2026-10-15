@@ -269,3 +269,78 @@ button:disabled {
   padding: 4px 0;
   border-bottom: 1px solid var(--border);
 }
+
+nav {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+}
+
+nav a {
+  color: var(--muted);
+  text-decoration: none;
+  padding-bottom: 2px;
+}
+
+nav a.active {
+  color: var(--text);
+  border-bottom: 2px solid var(--live);
+}
+
+button.secondary {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  text-align: right;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+th:first-child,
+td:first-child {
+  text-align: left;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+tr.highlight td {
+  font-weight: 600;
+  color: var(--live);
+}
+
+td.bad {
+  color: var(--faulted);
+}
+
+.chart {
+  margin: 0;
+}
+
+.chart svg {
+  width: 100%;
+  height: auto;
+}
+
+.chart .legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card {
+  overflow-x: auto;
+}
