@@ -101,6 +101,28 @@ def cmd_switch(args: argparse.Namespace) -> int:
     return cmd_status(args)
 
 
+def cmd_fault(args: argparse.Namespace) -> int:
+    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.sim import FaultError, apply_fault
+
+    try:
+        path = apply_fault(db.connect().select_graph(LIVE_GRAPH), args.line)
+    except FaultError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"fault on {args.line}; breaker tripped")
+    print(f"indicators set: {', '.join(path)}")
+    return cmd_status(args)
+
+
+def cmd_reset(args: argparse.Namespace) -> int:
+    from gridmend.sim import reset
+
+    reset(db.connect())
+    print("grid_live reset from grid_base")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gridmend")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -119,6 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
     switch.add_argument("switch_id")
     switch.add_argument("action", choices=["open", "close"])
     switch.set_defaults(func=cmd_switch)
+
+    fault = sub.add_parser("fault", help="simulate a fault on an unswitched segment")
+    fault.add_argument("line")
+    fault.set_defaults(func=cmd_fault)
+
+    sub.add_parser("reset", help="restore grid_live from grid_base").set_defaults(func=cmd_reset)
 
     return parser
 
