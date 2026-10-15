@@ -282,6 +282,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    from eval.run import markdown, run_all, summarize, write_outputs
+
+    rows = run_all(db.connect())
+    summary = summarize(rows)
+    out = write_outputs(rows, summary)
+    print(markdown(rows, summary))
+    print(f"wrote {out / 'results.csv'} and {out / 'results.md'}")
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     from gridmend.sim import reset
 
@@ -334,6 +345,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("line")
     run.add_argument("--auto", action="store_true", help="execute the best plan without asking")
     run.set_defaults(func=cmd_run)
+
+    sub.add_parser("eval", help="run all single faults against the baselines").set_defaults(
+        func=cmd_eval
+    )
 
     return parser
 

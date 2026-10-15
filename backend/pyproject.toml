@@ -8,6 +8,7 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "falkordb",
+    "networkx",
     "pandapower",
     "python-dotenv",
     "pyyaml",
@@ -23,4 +24,4 @@ gridmend = "gridmend.cli:main"
 testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
-include = ["gridmend*"]
+include = ["gridmend*", "eval*"]
