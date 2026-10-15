@@ -40,6 +40,16 @@ def set_switch(g: Graph, switch_id: str, status: str) -> bool:
     return True
 
 
+def apply_switch_ops(g: Graph, ops: list[tuple[str, str]]) -> None:
+    """Apply (switch_id, "open"|"close") operations in order, then recompute energization once."""
+    for switch_id, op in ops:
+        g.query(
+            "MATCH ()-[s:SW {id: $id}]->() SET s.status = $status",
+            {"id": switch_id, "status": "closed" if op == "close" else "open"},
+        )
+    refresh_energization(g)
+
+
 def grid_status(g: Graph) -> dict:
     zones = g.ro_query(
         "MATCH (z:Zone) RETURN z.id, z.energized, z.faulted, z.p_kw ORDER BY z.id"

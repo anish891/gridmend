@@ -129,6 +129,29 @@ def cmd_locate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_isolate(args: argparse.Namespace) -> int:
+    from gridmend.flisr.isolate import IsolateError, faulted_zone, isolate
+    from gridmend.flisr.locate import LocateError, locate_fault
+    from gridmend.flisr.trace import incident_trace
+    from gridmend.grid.load import LIVE_GRAPH
+
+    g = db.connect().select_graph(LIVE_GRAPH)
+    try:
+        if faulted_zone(g) is None:
+            locate_fault(g)
+        incident_id, ops = isolate(g)
+    except (LocateError, IsolateError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"incident {incident_id}: isolated Z{faulted_zone(g)}")
+    for i, op in enumerate(ops, 1):
+        print(f"  {i}. {op.op} {op.switch_id}")
+    for plan in incident_trace(g, incident_id):
+        print(f"trace: {incident_id} -> {plan['plan']} ({plan['kind']}, {plan['status']}) "
+              f"-> {len(plan['ops'])} switch ops")
+    return cmd_status(args)
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     from gridmend.sim import reset
 
@@ -163,6 +186,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("reset", help="restore grid_live from grid_base").set_defaults(func=cmd_reset)
     sub.add_parser("locate", help="locate the faulted zone from indicators").set_defaults(
         func=cmd_locate
+    )
+    sub.add_parser("isolate", help="isolate the faulted zone and record the incident").set_defaults(
+        func=cmd_isolate
     )
 
     return parser
