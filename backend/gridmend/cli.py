@@ -36,6 +36,24 @@ def cmd_load(args: argparse.Namespace) -> int:
     print(f"buses: {summary['buses']}")
     print(f"SEG:   {summary['seg']}")
     print(f"SW:    {sum(sw.values())} ({', '.join(f'{n} {k}' for k, n in sw.items())})")
+    print(f"zones: {summary['zones']}")
+    return 0
+
+
+def cmd_zones(args: argparse.Namespace) -> int:
+    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.zones import zone_table
+
+    rows = zone_table(db.connect().select_graph(LIVE_GRAPH))
+    print(f"{'zone':<5} {'buses':<8} {'upstream':<9} {'downstream':<20} {'ties':<26} {'kW':>5}")
+    for z in rows:
+        buses = z["buses"]
+        span = f"{min(buses)}-{max(buses)}" if len(buses) > 1 else str(buses[0])
+        print(
+            f"Z{z['id']:<4} {span:<8} {', '.join(z['upstream']):<9} "
+            f"{', '.join(sorted(z['downstream'])) or 'none':<20} "
+            f"{', '.join(sorted(z['ties'])) or 'none':<26} {z['p_kw']:>5.0f}"
+        )
     return 0
 
 
@@ -48,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
         func=cmd_basecase
     )
     sub.add_parser("load", help="write the feeder into FalkorDB").set_defaults(func=cmd_load)
+    sub.add_parser("zones", help="list zones in the live graph").set_defaults(func=cmd_zones)
 
     return parser
 

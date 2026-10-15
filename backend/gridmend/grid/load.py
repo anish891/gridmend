@@ -5,6 +5,7 @@ import yaml
 from falkordb import FalkorDB
 
 from gridmend.grid.case33 import ieee_bus, line_id, load_network
+from gridmend.grid.zones import build_zones
 
 ASSUMPTIONS_PATH = Path(__file__).resolve().parents[2] / "data" / "assumptions.yaml"
 
@@ -122,6 +123,7 @@ def write_graph(db: FalkorDB) -> dict:
         """,
         {"rows": switches},
     )
+    build_zones(g)
 
     g.copy(LIVE_GRAPH)
     return graph_summary(db.select_graph(LIVE_GRAPH))
@@ -133,4 +135,5 @@ def graph_summary(g) -> dict:
     kinds = g.ro_query(
         "MATCH ()-[s:SW]->() RETURN s.kind, count(s) ORDER BY s.kind"
     ).result_set
-    return {"buses": buses, "seg": segs, "sw": dict(kinds)}
+    zones = g.ro_query("MATCH (z:Zone) RETURN count(z)").result_set[0][0]
+    return {"buses": buses, "seg": segs, "sw": dict(kinds), "zones": zones}
