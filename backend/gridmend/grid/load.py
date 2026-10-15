@@ -5,6 +5,7 @@ import yaml
 from falkordb import FalkorDB
 
 from gridmend.grid.case33 import ieee_bus, line_id, load_network
+from gridmend.grid.energize import refresh_energization
 from gridmend.grid.zones import build_zones
 
 ASSUMPTIONS_PATH = Path(__file__).resolve().parents[2] / "data" / "assumptions.yaml"
@@ -124,6 +125,7 @@ def write_graph(db: FalkorDB) -> dict:
         {"rows": switches},
     )
     build_zones(g)
+    refresh_energization(g)
 
     g.copy(LIVE_GRAPH)
     return graph_summary(db.select_graph(LIVE_GRAPH))

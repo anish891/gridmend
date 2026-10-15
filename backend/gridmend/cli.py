@@ -57,6 +57,50 @@ def cmd_zones(args: argparse.Namespace) -> int:
     return 0
 
 
+def zone_list(ids: list[int]) -> str:
+    return ", ".join(f"Z{z}" for z in ids) or "none"
+
+
+def bus_ranges(ids: list[int]) -> str:
+    ranges, start = [], None
+    for i, bus in enumerate(ids):
+        if start is None:
+            start = bus
+        if i + 1 == len(ids) or ids[i + 1] != bus + 1:
+            ranges.append(str(start) if start == bus else f"{start}-{bus}")
+            start = None
+    return ", ".join(ranges) or "none"
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    from gridmend.grid.energize import grid_status
+    from gridmend.grid.load import LIVE_GRAPH
+
+    s = grid_status(db.connect().select_graph(LIVE_GRAPH))
+    print(f"energized zones: {zone_list(s['energized_zones'])}")
+    print(f"dark zones:      {zone_list(s['dark_zones'])}")
+    print(f"faulted zones:   {zone_list(s['faulted_zones'])}")
+    print(f"dark buses:      {bus_ranges(s['dark_buses'])}")
+    print(f"load served:     {s['served_kw']:.0f} / {s['total_kw']:.0f} kW")
+    print("switches:")
+    for sw in s["switches"]:
+        moved = "" if sw["status"] == sw["normally"] else "  (off normal)"
+        print(f"  {sw['id']:<6} {sw['kind']:<13} {sw['status']:<6} fi={sw['fi']}{moved}")
+    return 0
+
+
+def cmd_switch(args: argparse.Namespace) -> int:
+    from gridmend.grid.energize import set_switch
+    from gridmend.grid.load import LIVE_GRAPH
+
+    status = "closed" if args.action == "close" else "open"
+    if not set_switch(db.connect().select_graph(LIVE_GRAPH), args.switch_id, status):
+        print(f"no switch {args.switch_id}", file=sys.stderr)
+        return 1
+    print(f"{args.switch_id} {status}")
+    return cmd_status(args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gridmend")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -67,6 +111,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("load", help="write the feeder into FalkorDB").set_defaults(func=cmd_load)
     sub.add_parser("zones", help="list zones in the live graph").set_defaults(func=cmd_zones)
+    sub.add_parser("status", help="show energization and switch states").set_defaults(
+        func=cmd_status
+    )
+
+    switch = sub.add_parser("switch", help="operate a switch on the live graph")
+    switch.add_argument("switch_id")
+    switch.add_argument("action", choices=["open", "close"])
+    switch.set_defaults(func=cmd_switch)
 
     return parser
 
