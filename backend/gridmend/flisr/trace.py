@@ -79,3 +79,40 @@ ORDER BY p.id
 def incident_trace(g: Graph, incident_id: str) -> list[dict]:
     rows = g.ro_query(TRACE_QUERY, {"id": incident_id}).result_set
     return [dict(zip(("plan", "kind", "status", "ops"), row)) for row in rows]
+
+
+def plan_details(g: Graph, incident_id: str) -> list[dict]:
+    """Every restoration plan of an incident with its steps, outcome and violations."""
+    params = {"id": incident_id}
+    scope = "MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {kind: 'restoration'})"
+    plans = {
+        plan_id: {"plan_id": plan_id, "status": status, "restored_kw": kw or 0.0, "min_v_pu": min_v,
+                  "max_loading_pct": loading, "recommended": bool(recommended),
+                  "recommendation": reason, "ops": [], "violations": [], "restored_zones": [],
+                  "critical": []}
+        for plan_id, status, kw, min_v, loading, recommended, reason in g.ro_query(
+            scope + """
+            RETURN p.id, p.status, p.restored_kw, p.min_v_pu, p.max_loading_pct,
+                   p.recommended, p.recommendation
+            """, params).result_set
+    }
+    for plan_id, op, switch_id in g.ro_query(
+        scope + "-[:STEP]->(o:SwitchOp) RETURN p.id, o.op, o.switch_id ORDER BY o.seq", params
+    ).result_set:
+        plans[plan_id]["ops"].append({"switch_id": switch_id, "op": op})
+    for plan_id, kind, detail in g.ro_query(
+        scope + "-[:VIOLATES]->(v:Violation) RETURN p.id, v.type, v.detail", params
+    ).result_set:
+        plans[plan_id]["violations"].append({"type": kind, "detail": detail})
+    for plan_id, zone in g.ro_query(
+        scope + "-[:RESTORES]->(z:Zone) RETURN p.id, z.id ORDER BY z.id", params
+    ).result_set:
+        plans[plan_id]["restored_zones"].append(zone)
+    for plan_id, facility in g.ro_query(
+        scope + """
+        -[:RESTORES]->(:Zone)<-[:IN_ZONE]-(b:Bus {critical: true})
+        RETURN p.id, b.facility ORDER BY b.id
+        """, params
+    ).result_set:
+        plans[plan_id]["critical"].append(facility)
+    return sorted(plans.values(), key=lambda p: int(p["plan_id"].rsplit("p", 1)[1]))

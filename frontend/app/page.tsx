@@ -2,16 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import AgentPanel from "@/components/AgentPanel";
 import CandidateList from "@/components/CandidateList";
 import ExplanationPanel from "@/components/ExplanationPanel";
 import FeederDiagram, { type Pulse } from "@/components/FeederDiagram";
-import Intro from "@/components/Intro";
+import Intro, { type Mode } from "@/components/Intro";
 import StatusStrip from "@/components/StatusStrip";
 import Stepper from "@/components/Stepper";
 import Timeline from "@/components/Timeline";
 import TopBar from "@/components/TopBar";
 import {
-  api, type Explanation, type GridState, type Location, type PlanResult, type SwitchOp, type Trace,
+  api, runAgent, type AgentEvent, type Explanation, type GridState, type Location, type PlanResult,
+  type SwitchOp, type Trace,
 } from "@/lib/api";
 import { problemsFor, withSwitch } from "@/lib/overlay";
 
@@ -37,6 +39,10 @@ export default function Home() {
   const [trace, setTrace] = useState<Trace | null>(null);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
   const [pulse, setPulse] = useState<Pulse | null>(null);
+  const [mode, setMode] = useState<Mode>("rules");
+  const [agentModel, setAgentModel] = useState<string | null>(null);
+  const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
+  const [agentRunning, setAgentRunning] = useState(false);
 
   const flash = useCallback((ids: string[], kind: Pulse["kind"]) => {
     setPulse({ ids, kind, key: Math.random() });
@@ -69,6 +75,58 @@ export default function Home() {
     return next;
   }, []);
 
+  // The LLM agent works the incident through its tools; each call it makes is shown on the
+  // diagram as it happens. It only recommends: the operator still approves and executes.
+  const handleAgentEvent = useCallback(async (event: AgentEvent) => {
+    setAgentEvents((events) => [...events, event]);
+    if (event.type !== "tool" || "error" in event.result) return;
+    const result = event.result as Record<string, any>;
+    if (event.name === "locate_fault") {
+      working(STEP.locate, "The agent is following the chain of tripped fault indicators");
+      setLocation({ zone: result.faulted_zone, chain: result.indicator_chain });
+      for (const id of result.indicator_chain) {
+        flash([id], "fi");
+        await pause(600);
+      }
+      await refresh();
+    } else if (event.name === "isolation_plan") {
+      working(STEP.isolate, "The agent isolated the faulted zone");
+      const ops = (result.executed as string[]).map((step) => {
+        const [op, switch_id] = step.split(" ");
+        return { op, switch_id } as SwitchOp;
+      });
+      await replay(ops);
+      await refresh();
+      setTrace(await api.trace());
+    } else if (event.name === "restoration_candidates") {
+      working(STEP.verify, `The agent got ${result.candidates.length} candidates and is verifying them on forks`);
+    } else if (event.name === "verify_plan") {
+      working(STEP.verify, `The agent verified ${result.plan_id} on a fork: ${result.passed ? "passed" : "rejected"}`);
+      setTrace(await api.trace());
+    } else if (event.name === "recommend_plan") {
+      working(STEP.verify, `The agent recommends ${result.recommended} and is writing its explanation`);
+    }
+  }, [working, flash, refresh, replay]);
+
+  const runWithAgent = useCallback(async () => {
+    setAgentEvents([]);
+    setAgentRunning(true);
+    working(STEP.locate, "The operator agent is starting on the incident");
+    let chain = Promise.resolve();
+    try {
+      await runAgent((event) => {
+        chain = chain.then(() => handleAgentEvent(event));
+      });
+      await chain;
+      const result = await api.plans();
+      setPlan(result);
+      setSelected(result.recommended);
+      setTrace(await api.trace());
+    } finally {
+      setAgentRunning(false);
+    }
+  }, [working, handleAgentEvent]);
+
   const run = useCallback(async (from: Step, line?: string) => {
     setError(null);
     try {
@@ -79,6 +137,10 @@ export default function Home() {
         await refresh();
         flash([line], "fault");
         await pause(1100);
+        if (mode === "agent") {
+          await runWithAgent();
+          return;
+        }
       }
       if (from !== "plan") {
         working(STEP.locate, "Following the chain of tripped fault indicators");
@@ -107,7 +169,7 @@ export default function Home() {
     } finally {
       setBusy(null);
     }
-  }, [refresh, working, flash, replay]);
+  }, [refresh, working, flash, replay, mode, runWithAgent]);
 
   const approve = useCallback(async (planId: string) => {
     setError(null);
@@ -139,6 +201,7 @@ export default function Home() {
       setExecuted(null);
       setTrace(null);
       setExplanation(null);
+      setAgentEvents([]);
       await refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -146,6 +209,12 @@ export default function Home() {
       setBusy(null);
     }
   }, [refresh, working]);
+
+  useEffect(() => {
+    api.agentInfo()
+      .then((info) => setAgentModel(info.available ? info.model : null))
+      .catch(() => setAgentModel(null));
+  }, []);
 
   // Pick up an incident already in progress, e.g. after a page reload.
   useEffect(() => {
@@ -230,12 +299,21 @@ export default function Home() {
         </section>
 
         {healthy ? (
-          <Intro disabled={busy !== null} onFault={(line) => run("fault", line)} />
+          <Intro
+            disabled={busy !== null}
+            onFault={(line) => run("fault", line)}
+            agentModel={agentModel}
+            mode={mode}
+            onMode={setMode}
+          />
         ) : (
           <Timeline fault={fault} location={location} trace={trace} />
         )}
       </div>
 
+      {(agentRunning || agentEvents.length > 0) && (
+        <AgentPanel model={agentModel} events={agentEvents} running={agentRunning} />
+      )}
       {plan && (
         <section className="card">
           <div className="card-head">

@@ -14,6 +14,7 @@ const ORIGIN = {
   greedy: "operator reflex: a tie into every dead zone",
   "tie-only": "single tie, nothing opened",
   repaired: "ties plus openings that keep it radial and within ratings",
+  agent: "checked at the operator agent's request",
 };
 
 const V_MIN = 0.9;
@@ -65,6 +66,11 @@ export default function CandidateList(props: Props) {
             <span className="fork-id" title="checked on its own copy of the graph">fork_{c.plan_id}</span>
           </div>
           <div className="muted small">{ORIGIN[c.origin]}</div>
+          {c.recommendation && (
+            <div className="agent-reason">
+              <span className="tag agent">agent</span> {c.recommendation}
+            </div>
+          )}
 
           <div className="ops">
             {c.ops.map((o) => (

@@ -45,6 +45,9 @@ SCHEMAS = [
          "close": {**SWITCH_LIST, "description": "switch ids to close"},
          "open": {**SWITCH_LIST, "description": "switch ids to open"}},
     ),
+    schema("recommend_plan", "Record which verified plan you recommend and why. The reason is "
+                             "stored with the plan in the decision trace.",
+           {"plan_id": {"type": "string"}, "reason": {"type": "string"}}, ["plan_id", "reason"]),
     schema("execute_plan", "Execute a verified plan on the live grid after operator approval.",
            {"plan_id": {"type": "string"}}, ["plan_id"]),
     schema("explain_plan", "Explain the incident: feeding paths of restored zones, margins, "
@@ -55,15 +58,19 @@ SCHEMAS = [
 class GridTools:
     """The agent's only way to touch the grid. Every write is deterministic code."""
 
-    def __init__(self, db: FalkorDB, g: Graph, approve: Callable[[dict], bool]):
+    def __init__(self, db: FalkorDB, g: Graph, approve: Callable[[dict], bool],
+                 can_execute: bool = True):
         self.db = db
         self.g = g
         self.approve = approve
         self.candidates: list[Candidate] = []
+        # An advisor never gets the execute tool: the operator approves and executes.
+        self.schemas = [s for s in SCHEMAS
+                        if can_execute or s["function"]["name"] != "execute_plan"]
 
     def call(self, name: str, args: dict) -> dict:
         handler = getattr(self, name, None)
-        if name not in {s["function"]["name"] for s in SCHEMAS} or handler is None:
+        if name not in {s["function"]["name"] for s in self.schemas} or handler is None:
             return {"error": f"unknown tool {name}"}
         try:
             return handler(**args)
@@ -141,6 +148,22 @@ class GridTools:
             "max_loading_pct": result.max_loading_pct and round(result.max_loading_pct),
             "violations": [f"{kind}: {detail}" for kind, detail in result.violations],
         }
+
+    def recommend_plan(self, plan_id: str, reason: str) -> dict:
+        incident_id = self.incident_id()
+        plan = next((p for p in verified_plans(self.g, incident_id) if p["id"] == plan_id), None)
+        if plan is None:
+            raise ValueError(f"{plan_id} is not a verified plan of this incident")
+        self.g.query(
+            """
+            MATCH (:Incident {id: $incident})-[:HAS_PLAN]->(p:Plan)
+            SET p.recommended = (p.id = $id),
+                p.recommendation = CASE WHEN p.id = $id THEN $reason ELSE null END
+            """,
+            {"incident": incident_id, "id": plan_id, "reason": reason},
+        )
+        return {"recommended": plan_id, "critical_loads_restored": plan["critical"],
+                "restored_kw": round(plan["restored_kw"])}
 
     def execute_plan(self, plan_id: str) -> dict:
         plan = next((p for p in verified_plans(self.g, self.incident_id()) if p["id"] == plan_id),

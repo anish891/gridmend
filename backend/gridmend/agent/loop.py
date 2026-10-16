@@ -3,7 +3,7 @@ from collections.abc import Callable
 
 from openai import OpenAI
 
-from gridmend.agent.tools import SCHEMAS, GridTools
+from gridmend.agent.tools import GridTools
 
 SYSTEM_PROMPT = """You are GridMend, an assistant to a distribution grid operator. The feeder's
 breaker has tripped. Restore service safely using only your tools; the grid twin lives in a
@@ -21,6 +21,24 @@ Work in this order:
 
 If no candidate passes verification, do not execute anything; explain why instead."""
 
+# In the web UI the agent advises and the operator executes, so it never gets execute_plan.
+ADVISOR_PROMPT = """You are GridMend, an assistant to a distribution grid operator. The feeder's
+breaker has tripped. Work the incident using only your tools; the grid twin lives in a graph
+database and every action goes through deterministic, verified code. You advise; the operator
+approves and executes.
+
+Work in this order:
+1. locate_fault, then isolation_plan.
+2. restoration_candidates, then verify_plan for each candidate (by rank).
+3. Choose one plan that PASSED verification: restore the most critical loads first, then the
+   most load (kW), then use the fewest switch operations. Never choose a plan that failed.
+   Call recommend_plan with its plan_id and a one-sentence reason.
+4. Finish with a short explanation for the operator: what faulted and what was isolated, the plan
+   you recommend and why, which critical loads it restores and which stay dark and why, and why
+   the main alternatives were rejected. Use only facts returned by the tools.
+
+If no candidate passes verification, recommend nothing and explain why."""
+
 MAX_STEPS = 25
 
 
@@ -33,14 +51,15 @@ def run_agent(
     model: str,
     tools: GridTools,
     on_step: Callable[[str, dict, dict], None] = lambda name, args, result: None,
+    prompt: str = SYSTEM_PROMPT,
 ) -> str:
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": prompt},
         {"role": "user", "content": "The feeder breaker just tripped. Restore service."},
     ]
     for _ in range(MAX_STEPS):
         reply = client.chat.completions.create(
-            model=model, messages=messages, tools=SCHEMAS, temperature=0
+            model=model, messages=messages, tools=tools.schemas, temperature=0
         )
         message = reply.choices[0].message
         messages.append(message.model_dump(exclude_none=True))

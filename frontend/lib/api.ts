@@ -42,7 +42,7 @@ export type Violation = { type: string; detail: string };
 
 export type Candidate = {
   plan_id: string;
-  origin: "greedy" | "tie-only" | "repaired";
+  origin: "greedy" | "tie-only" | "repaired" | "agent";
   score: number;
   ops: SwitchOp[];
   passed: boolean;
@@ -53,6 +53,7 @@ export type Candidate = {
   min_v_pu: number | null;
   max_loading_pct: number | null;
   violations: Violation[];
+  recommendation?: string | null;
 };
 
 export type PlanResult = { incident: string; recommended: string | null; candidates: Candidate[] };
@@ -132,6 +133,33 @@ export type QueryStep = {
   total_rows?: number;
 };
 
+export type AgentEvent =
+  | { type: "tool"; name: string; args: Record<string, unknown>; result: Record<string, unknown> }
+  | { type: "final"; text: string; model: string }
+  | { type: "error"; detail: string };
+
+// The agent streams one server-sent event per tool call, then its final answer.
+export async function runAgent(onEvent: (event: AgentEvent) => void): Promise<void> {
+  const response = await fetch(`${API_URL}/agent/run`, { method: "POST", cache: "no-store" });
+  if (!response.ok || !response.body) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail ?? `the agent could not start (${response.status})`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      if (chunk.startsWith("data: ")) onEvent(JSON.parse(chunk.slice(6)));
+    }
+  }
+}
+
 async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     method,
@@ -155,5 +183,7 @@ export const api = {
   trace: () => call<Trace>("GET", "/trace"),
   results: () => call<Results>("GET", "/results"),
   queries: () => call<{ graph: string; steps: QueryStep[] }>("GET", "/queries"),
+  plans: () => call<PlanResult>("GET", "/plans"),
+  agentInfo: () => call<{ available: boolean; model: string | null }>("GET", "/agent"),
   reset: () => call<{ ok: boolean }>("POST", "/reset"),
 };

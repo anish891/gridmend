@@ -1,5 +1,10 @@
+import json
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
+from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageToolCall
+from openai.types.chat.chat_completion_message_tool_call import Function
 
 from gridmend import api
 from conftest import TEST_GRAPH
@@ -82,3 +87,110 @@ def test_queries_run_live_and_follow_the_incident(client):
     assert isolated["isolate"]["params"] == {"zone": 3}
     assert isolated["options"]["rows"] == [[7, "8-21"], [10, "12-22"]]
     assert isolated["trace"]["rows"][0][:3] == ["inc1-iso", "isolation", "executed"]
+
+
+class ScriptedAdvisor:
+    """Stands in for the LLM: follows the advisor prompt using real tool results."""
+
+    def __init__(self):
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+        self.offered = []
+
+    def create(self, model, messages, tools, temperature):
+        self.offered = [t["function"]["name"] for t in tools]
+        results = [json.loads(m["content"]) for m in messages if m["role"] == "tool"]
+        script = ["locate_fault", "isolation_plan", "restoration_candidates"]
+        if len(results) < len(script):
+            return self.call(script[len(results)], {})
+        candidates = results[2]["candidates"]
+        verified = results[3:3 + len(candidates)]
+        if len(verified) < len(candidates):
+            return self.call("verify_plan", {"rank": len(verified) + 1})
+        if len(results) == 3 + len(candidates):
+            best = max((v for v in verified if v["passed"]),
+                       key=lambda v: (len(v["critical_loads_restored"]), v["restored_kw"]))
+            return self.call("recommend_plan", {"plan_id": best["plan_id"],
+                                                "reason": "restores the hospital and fire station"})
+        return self.wrap(ChatCompletionMessage(role="assistant", content="Recommend it."))
+
+    def call(self, name, args):
+        tool_call = ChatCompletionMessageToolCall(
+            id=f"c{name}{len(self.offered)}", type="function",
+            function=Function(name=name, arguments=json.dumps(args)))
+        return self.wrap(ChatCompletionMessage(role="assistant", tool_calls=[tool_call]))
+
+    @staticmethod
+    def wrap(message):
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+@pytest.fixture
+def agent(client, monkeypatch):
+    advisor = ScriptedAdvisor()
+    monkeypatch.setenv("LLM_API_KEY", "test")
+    monkeypatch.setattr(api, "agent_client", lambda: (advisor, "scripted"))
+    monkeypatch.setattr(api, "AGENT_COOLDOWN_S", 0)
+    return advisor
+
+
+def stream_events(client):
+    with client.stream("POST", "/agent/run") as response:
+        assert response.status_code == 200
+        return [json.loads(line[len("data: "):]) for line in response.iter_lines()
+                if line.startswith("data: ")]
+
+
+def test_agent_is_hidden_without_an_llm(client, monkeypatch):
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    assert client.get("/agent").json() == {"available": False, "model": None}
+    client.post("/fault", json={"line": "4-5"})
+    assert client.post("/agent/run").status_code == 503
+
+
+def test_agent_needs_a_tripped_breaker(client, agent):
+    assert client.post("/agent/run").status_code == 409
+
+
+def test_agent_advises_and_the_operator_executes(client, agent):
+    client.post("/fault", json={"line": "4-5"})
+    events = stream_events(client)
+
+    assert "execute_plan" not in agent.offered
+    assert [e["name"] for e in events if e["type"] == "tool"][:3] == [
+        "locate_fault", "isolation_plan", "restoration_candidates"]
+    assert events[-1] == {"type": "final", "text": "Recommend it.", "model": "scripted"}
+    assert client.get("/state").json()["served_kw"] == pytest.approx(460)
+
+    plans = client.get("/plans").json()
+    recommended = next(p for p in plans["candidates"] if p["plan_id"] == plans["recommended"])
+    assert recommended["recommended"] and recommended["critical"] == ["hospital", "fire station"]
+    assert recommended["recommendation"] == "restores the hospital and fire station"
+    assert all(set(p) >= {"ops", "violations", "restored_zones", "dropped_zones", "critical"}
+               for p in plans["candidates"])
+    assert client.post("/execute", json={"plan_id": plans["recommended"]}).status_code == 200
+    assert client.get("/state").json()["served_kw"] == pytest.approx(1310)
+
+
+def test_agent_cannot_recommend_a_rejected_plan(falkordb, graph):
+    from gridmend.agent.tools import GridTools
+    from gridmend.sim import apply_fault
+
+    apply_fault(graph, "4-5")
+    tools = GridTools(falkordb, graph, approve=lambda plan: False, can_execute=False)
+    tools.locate_fault()
+    tools.isolation_plan()
+    rejected = tools.verify_plan(close=["8-21", "12-22"])
+    assert "error" in tools.call("recommend_plan", {"plan_id": rejected["plan_id"], "reason": "x"})
+    assert "error" in tools.call("execute_plan", {"plan_id": rejected["plan_id"]})
+
+
+def test_agent_runs_are_spaced_out(client, agent, monkeypatch):
+    import time
+
+    client.post("/fault", json={"line": "4-5"})
+    monkeypatch.setattr(api, "AGENT_COOLDOWN_S", 600)
+    monkeypatch.setattr(api, "_agent_last_finished", time.monotonic())
+    response = client.post("/agent/run")
+    assert response.status_code == 429
+    assert "cooling down" in response.json()["detail"]

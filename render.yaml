@@ -5,3 +5,14 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/state
+    envVars:
+      # Optional: set all three to enable the LLM operator agent in the UI.
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      # Seconds between agent runs across all visitors, to protect the LLM quota.
+      - key: AGENT_COOLDOWN_S
+        value: "60"

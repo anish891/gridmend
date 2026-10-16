@@ -70,6 +70,24 @@ returned. All writes to the graph are deterministic code.
 * The plan with both critical loads is executed. Water pumping stays dark (no tie reaches a
   live zone) and so does telecom (closing 18-33 from Z14 would overload the path through 2-19).
 
+## What the LLM does, and what it does not
+
+The LLM is the operator's assistant, not the controller.
+
+* **It decides which tools to call and in what order**: locate, isolate, candidates, which
+  candidates to verify. Each tool is deterministic code over the graph.
+* **It chooses among verified plans** and justifies the choice (critical loads first, then
+  restored load, then fewest switch operations). `recommend_plan` refuses a plan that did not pass
+  verification, and the choice and reason are written into the decision trace.
+* **It explains** the incident to the operator from what the tools returned: what faulted, what
+  was isolated, why the alternatives failed, which critical loads stay dark and why.
+
+It never writes Cypher, never flips a switch, never decides whether a plan is safe (the fork
+verifier does), and in the web UI it never executes: the operator does. Without an LLM, the same
+pipeline runs with a deterministic ranking, which is what the evaluation's `gridmend` row uses.
+The evaluation's `llm-only` row shows what happens when a model plans without the graph and the
+verifier: 20 of 23 plans unsafe.
+
 ## Why FalkorDB is load-bearing
 
 Remove FalkorDB and nothing is left: no twin, no forks, no paths, no trace.
@@ -302,8 +320,16 @@ LLM_MODEL=qwen/qwen3.8-27b
 LLM_API_KEY=...
 ```
 
-Then `gridmend agent 4-5` lets the agent work the incident through the tools and asks for your
-approval before it executes a plan.
+Then:
+
+* `gridmend agent 4-5` lets the agent work the incident through the tools and asks for your
+  approval before it executes a plan.
+* In the web UI, the intro card shows **Who works the incident: Rule-based / LLM operator agent**.
+  In agent mode the agent locates, isolates, asks for candidates, verifies each on a fork and
+  calls `recommend_plan`, while every tool call streams into an agent log and replays on the
+  diagram. It never gets the execute tool: its pick and its reason are stored on the Plan node,
+  and you approve and execute with the usual button. One run at a time across all visitors, with
+  `AGENT_COOLDOWN_S` (default 30) between runs. Without an LLM configured the switch is hidden.
 
 ### MCP
 
@@ -341,9 +367,12 @@ arm64 to `ghcr.io/anish891/gridmend` on every push to `main`.
 
 [render.yaml](render.yaml) describes one free Docker web service. In the Render dashboard choose
 **New > Blueprint**, select this repository and apply. The first build takes several minutes;
-the health check is `GET /api/state`. Nothing else is needed: FalkorDB runs inside the
-container and the feeder is reloaded on every start, so there is no database to provision and
-no secret to set.
+the health check is `GET /api/state`. FalkorDB runs inside the container and the feeder is
+reloaded on every start, so there is no database to provision.
+
+To enable the LLM operator agent on the deployed site, set `LLM_BASE_URL`, `LLM_MODEL` and
+`LLM_API_KEY` in the service's **Environment** settings (the blueprint declares them) and redeploy.
+Leave them unset and the site runs rule-based only.
 
 ## Data and assumptions
 

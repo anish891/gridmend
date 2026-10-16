@@ -4,9 +4,17 @@ const DEMO_FAULTS = [
   { line: "27-28", note: "Lateral. The only tie sags voltage below 0.90 pu, so nothing is safe." },
 ];
 
-type Props = { disabled: boolean; onFault: (line: string) => void };
+export type Mode = "rules" | "agent";
 
-export default function Intro({ disabled, onFault }: Props) {
+type Props = {
+  disabled: boolean;
+  onFault: (line: string) => void;
+  agentModel: string | null;
+  mode: Mode;
+  onMode: (mode: Mode) => void;
+};
+
+export default function Intro({ disabled, onFault, agentModel, mode, onMode }: Props) {
   return (
     <aside className="card intro">
       <h2>How it works</h2>
@@ -17,6 +25,23 @@ export default function Intro({ disabled, onFault }: Props) {
         <li><b>Verify</b> every plan on a forked copy of the graph: isolation, radiality, line capacity, voltage.</li>
         <li><b>Approve</b> one that passed. Every decision is stored in the graph and explained.</li>
       </ol>
+      {agentModel && (
+        <>
+          <h3>Who works the incident</h3>
+          <div className="mode-switch" role="radiogroup">
+            <button role="radio" aria-checked={mode === "rules"} className={mode === "rules" ? "on" : undefined}
+              onClick={() => onMode("rules")}>
+              Rule-based
+              <span>instant, deterministic ranking</span>
+            </button>
+            <button role="radio" aria-checked={mode === "agent"} className={mode === "agent" ? "on" : undefined}
+              onClick={() => onMode("agent")}>
+              LLM operator agent
+              <span>{agentModel}, about 1 to 2 minutes</span>
+            </button>
+          </div>
+        </>
+      )}
       <h3>Try a fault</h3>
       <div className="demo-faults">
         {DEMO_FAULTS.map((f) => (

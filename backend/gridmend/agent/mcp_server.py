@@ -52,6 +52,11 @@ def verify_plan(rank: int | None = None, close: list[str] | None = None,
     return tools().call("verify_plan", {"rank": rank, "close": close, "open": open})
 
 
+@server.tool(description=DESCRIPTIONS["recommend_plan"])
+def recommend_plan(plan_id: str, reason: str) -> dict:
+    return tools().call("recommend_plan", {"plan_id": plan_id, "reason": reason})
+
+
 @server.tool(description=DESCRIPTIONS["execute_plan"])
 def execute_plan(plan_id: str) -> dict:
     return tools().call("execute_plan", {"plan_id": plan_id})

@@ -16,6 +16,8 @@ class Settings:
     llm_base_url: str
     llm_model: str
     llm_api_key: str
+    # True only when an LLM endpoint was set explicitly, so a deployment without one hides the agent.
+    llm_configured: bool
 
 
 def load_settings() -> Settings:
@@ -26,4 +28,5 @@ def load_settings() -> Settings:
         llm_model=os.getenv("LLM_MODEL", "qwen2.5:7b"),
         # Ollama ignores the key, but the client requires one.
         llm_api_key=os.getenv("LLM_API_KEY", "ollama"),
+        llm_configured=bool(os.getenv("LLM_API_KEY") or os.getenv("LLM_BASE_URL")),
     )
