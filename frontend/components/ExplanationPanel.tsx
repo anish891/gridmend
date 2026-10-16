@@ -1,13 +1,9 @@
+import Card from "@/components/ui/Card";
 import type { Explanation } from "@/lib/api";
 
 export default function ExplanationPanel({ e }: { e: Explanation }) {
   return (
-    <section className="card explanation">
-      <div className="card-head">
-        <h2>Explanation</h2>
-        <span className="muted small">built from the decision trace stored in the graph</span>
-      </div>
-
+    <Card className="explanation" title="Explanation" hint="built from the decision trace stored in the graph">
       <div className="explain-grid">
         <div>
           <h3>What happened</h3>
@@ -77,6 +73,6 @@ export default function ExplanationPanel({ e }: { e: Explanation }) {
           )}
         </div>
       </div>
-    </section>
+    </Card>
   );
 }

@@ -5,12 +5,18 @@ import { useCallback, useEffect, useState } from "react";
 import AgentPanel from "@/components/AgentPanel";
 import CandidateList from "@/components/CandidateList";
 import ExplanationPanel from "@/components/ExplanationPanel";
+import FaultPicker, { type Mode } from "@/components/FaultPicker";
 import FeederDiagram, { RISK_STEPS, type Pulse, type Risk } from "@/components/FeederDiagram";
-import Intro, { type Mode } from "@/components/Intro";
+import Intro from "@/components/Intro";
 import StatusStrip from "@/components/StatusStrip";
 import Stepper from "@/components/Stepper";
 import Timeline from "@/components/Timeline";
 import TopBar from "@/components/TopBar";
+import Button from "@/components/ui/Button";
+import Card from "@/components/ui/Card";
+import EmptyState from "@/components/ui/EmptyState";
+import Segmented from "@/components/ui/Segmented";
+import Term from "@/components/ui/Term";
 import {
   api, runAgent, type AgentEvent, type Explanation, type GridState, type Location, type PlanResult,
   type SwitchOp, type Trace,
@@ -259,42 +265,64 @@ export default function Home() {
     : STEP.locate;
 
   const message = busy ? busy.message
-    : healthy ? "The feeder is healthy. Pick a demo fault or click any line segment on the diagram."
-    : status === "restored" ? "Service restored. The explanation below is read back from the decision trace."
-    : nothingPassed ? "No candidate passed verification, so nothing unsafe is executed; the fault stays isolated."
-    : plan ? "Hover a candidate to preview its switching on the diagram, then approve one that passed."
-    : status === "isolated" ? <button onClick={() => run("plan")}>Generate and verify plans</button>
-    : fault ? <button onClick={() => run("locate")}>Locate and isolate</button>
+    : status === "restored" ? "Power is back wherever it is safe. The explanation below is read from the decision trace."
+    : plan?.candidates.length === 0 ? "No backup route reaches the dark sections, so the fault stays isolated."
+    : nothingPassed ? "No plan passed the safety checks, so nothing risky was switched. The fault stays isolated."
+    : plan ? "Select a plan to preview its switching on the map, then approve one that passed."
+    : status === "isolated" ? "The fault is cut out and everything upstream has power. Next, find routes for the rest."
+    : fault ? "The substation breaker tripped and the whole feeder is dark."
     : null;
+
+  // The one next step for the operator, when it is theirs to take.
+  const action = busy || status === "restored" || plan ? null
+    : status === "isolated" ? <Button onClick={() => run("plan")}>Find restoration plans</Button>
+    : fault ? <Button onClick={() => run("locate")}>Locate and isolate the fault</Button>
+    : null;
+
+  const picking = healthy && !busy;
 
   return (
     <main>
       <TopBar page="feeder">
-        <button className="secondary" disabled={busy !== null || healthy} onClick={resetGrid}>
+        <Button variant="secondary" disabled={busy !== null || healthy} onClick={resetGrid}>
           Reset feeder
-        </button>
+        </Button>
       </TopBar>
-      {error && <p className="error">{error}</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+      {picking ? (
+        <FaultPicker
+          disabled={busy !== null}
+          onFault={(line) => run("fault", line)}
+          agentModel={agentModel}
+          mode={mode}
+          onMode={setMode}
+        />
+      ) : (
+        <Stepper
+          done={done}
+          active={busy?.step ?? null}
+          elapsed={Math.round((now - startedAt) / 1000)}
+          message={message}
+          action={action}
+        />
+      )}
       {state && <StatusStrip state={state} trace={trace} />}
-      <Stepper
-        done={done}
-        active={busy?.step ?? null}
-        elapsed={Math.round((now - startedAt) / 1000)}
-        message={message}
-      />
 
       <div className="layout">
-        <section className="card diagram-card">
-          <div className="card-head">
-            <h2>IEEE 33-bus feeder</h2>
-            <span className="muted small">hover any bus, line or switch for details</span>
-            <div className="view-switch" role="radiogroup" aria-label="Diagram view">
-              <button role="radio" aria-checked={!showRisk} className={!showRisk ? "on" : undefined}
-                onClick={() => toggleRisk(false)}>Live</button>
-              <button role="radio" aria-checked={showRisk} className={showRisk ? "on" : undefined}
-                onClick={() => toggleRisk(true)}>Risk map</button>
-            </div>
-          </div>
+        <Card
+          className="diagram-card"
+          title="Feeder map"
+          hint={picking ? "IEEE 33-bus feeder. Click a line to fault it, hover anything for details"
+            : "IEEE 33-bus feeder. Hover anything for details"}
+          actions={
+            <Segmented
+              label="Diagram view"
+              value={showRisk ? "risk" : "live"}
+              onChange={(view) => toggleRisk(view === "risk")}
+              options={[{ value: "live", label: "Live" }, { value: "risk", label: "Risk map" }]}
+            />
+          }
+        >
           {state && (
             <FeederDiagram
               state={state}
@@ -307,7 +335,7 @@ export default function Home() {
           )}
           {showRisk && (
             <div className="risk-legend">
-              <span className="muted small">If this line faults, load still dark after the best safe restoration:</span>
+              <span className="muted small">How much load stays dark if a line fails, even after the best safe re-routing:</span>
               <div className="risk-scale">
                 {RISK_STEPS.map(([from, color], i) => (
                   <span key={from}>
@@ -316,32 +344,44 @@ export default function Home() {
                   </span>
                 ))}
               </div>
-              <span className="muted small">From the 23-fault evaluation. Hover a line for the critical loads it would cost.</span>
+              <span className="muted small">From the 23-fault evaluation. Hover a line for the critical sites it would cost.</span>
             </div>
           )}
           <ul className="legend">
-            <li><span className="swatch live" /> energized</li>
-            <li><span className="swatch dark" /> de-energized</li>
-            <li><span className="swatch faulted" /> faulted zone</li>
+            <li><span className="swatch live" /> has power</li>
+            <li><span className="swatch dark" /> no power</li>
             <li><span className="box closed" /> closed switch</li>
             <li><span className="box open" /> open switch</li>
-            <li><span className="dash" /> tie</li>
-            <li><span className="box fi" /> indicator set</li>
-            <li><span className="box to-close" /> plan closes</li>
-            <li><span className="box to-open" /> plan opens</li>
-            <li><span className="problem-mark" /> why rejected</li>
-            <li><span className="star">★</span> critical load</li>
+            <li>
+              <span className="dash" />
+              <Term hint="A backup switch, normally open, that can feed a dark section from another route.">
+                tie switch
+              </Term>
+            </li>
+            <li><span className="star">★</span> critical site</li>
+            {!healthy && (
+              <>
+                <li><span className="swatch faulted" /> faulted zone</li>
+                <li>
+                  <span className="box fi" />
+                  <Term hint="Fault current passed through this switch. The chain of these leads to the fault.">
+                    indicator tripped
+                  </Term>
+                </li>
+              </>
+            )}
+            {plan && plan.candidates.length > 0 && (
+              <>
+                <li><span className="box to-close" /> plan closes</li>
+                <li><span className="box to-open" /> plan opens</li>
+                <li><span className="problem-mark" /> why a plan failed</li>
+              </>
+            )}
           </ul>
-        </section>
+        </Card>
 
         {healthy ? (
-          <Intro
-            disabled={busy !== null}
-            onFault={(line) => run("fault", line)}
-            agentModel={agentModel}
-            mode={mode}
-            onMode={setMode}
-          />
+          <Intro />
         ) : (
           <Timeline fault={fault} location={location} trace={trace} />
         )}
@@ -351,16 +391,15 @@ export default function Home() {
         <AgentPanel model={agentModel} events={agentEvents} running={agentRunning} />
       )}
       {plan && (
-        <section className="card">
-          <div className="card-head">
-            <h2>Restoration candidates</h2>
-            <span className="muted small">
-              ranked by weighted restored load; each checked on its own copy of the graph.
-              Hover a rejected plan to see the problem on the diagram
-            </span>
-          </div>
+        <Card
+          className="plans-card"
+          title="Restoration plans"
+          hint="Ranked by load restored, critical sites first. Select a plan to see it, or why it failed, on the map"
+        >
           {plan.candidates.length === 0 ? (
-            <p className="muted">No dead zone can be reached from a live one, so there is nothing to restore.</p>
+            <EmptyState title="Nothing to restore">
+              No dead zone can be reached from a live one.
+            </EmptyState>
           ) : (
             <CandidateList
               candidates={plan.candidates}
@@ -372,7 +411,7 @@ export default function Home() {
               onApprove={approve}
             />
           )}
-        </section>
+        </Card>
       )}
       {explanation && <ExplanationPanel e={explanation} />}
     </main>

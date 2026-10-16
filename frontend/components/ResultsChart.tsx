@@ -1,4 +1,6 @@
+import EmptyState from "@/components/ui/EmptyState";
 import type { ResultRow } from "@/lib/api";
+import { methodLabel } from "@/lib/methods";
 
 // Series colours are theme tokens, applied through style so CSS variables resolve.
 const METHOD_COLORS: Record<string, string> = {
@@ -23,7 +25,9 @@ function tickStep(max: number): number {
 export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
   const methods = Object.keys(METHOD_COLORS).filter((m) => rows.some((r) => r.method === m));
   const faults = [...new Set(rows.filter((r) => r.optimal_kw > 0).map((r) => r.fault))];
-  if (faults.length === 0) return <p className="muted">No fault leaves restorable load.</p>;
+  if (faults.length === 0) {
+    return <EmptyState title="Nothing to chart">No fault leaves restorable load.</EmptyState>;
+  }
 
   const step = tickStep(Math.max(...rows.map((r) => r.optimal_kw)));
   const top = Math.ceil(Math.max(...rows.map((r) => r.optimal_kw)) / step) * step;
@@ -63,7 +67,7 @@ export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
                       rx={2}
                       style={{ fill: METHOD_COLORS[method] }}
                     >
-                      <title>{`${method}: ${Math.round(row.restored_kw)} kW, ${row.violations} violations`}</title>
+                      <title>{`${methodLabel(method)}: ${Math.round(row.restored_kw)} kW, ${row.violations} violations`}</title>
                     </rect>
                     {row.violations > 0 && (
                       <text x={x + barW / 2} y={y(0) - 4} textAnchor="middle" fontSize="14" fontWeight="700"
@@ -85,13 +89,12 @@ export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
       <figcaption className="legend">
         {methods.map((m) => (
           <span key={m}>
-            <span className="swatch" style={{ background: METHOD_COLORS[m], borderRadius: 2 }} /> {m}
+            <span className="swatch" style={{ background: METHOD_COLORS[m], borderRadius: 2 }} /> {methodLabel(m)}
           </span>
         ))}
         <span>
-          <span style={{ color: "var(--faulted)", fontWeight: 700 }}>×</span> unsafe plan (restores nothing)
+          <span style={{ color: "var(--faulted)", fontWeight: 700 }}>×</span> unsafe plan, counts as nothing restored
         </span>
-        <span className="chart-note">Restored kW, faults that leave restorable load</span>
       </figcaption>
     </figure>
   );

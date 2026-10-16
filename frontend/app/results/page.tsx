@@ -4,11 +4,18 @@ import { useEffect, useState } from "react";
 
 import ResultsChart from "@/components/ResultsChart";
 import TopBar from "@/components/TopBar";
+import Button from "@/components/ui/Button";
+import Card from "@/components/ui/Card";
+import EmptyState from "@/components/ui/EmptyState";
+import Spinner from "@/components/ui/Spinner";
+import Term from "@/components/ui/Term";
 import { api, type Results } from "@/lib/api";
+import { METHODS, methodLabel } from "@/lib/methods";
 
 export default function ResultsPage() {
   const [results, setResults] = useState<Results | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showFaults, setShowFaults] = useState(false);
 
   useEffect(() => {
     api.results().then(setResults).catch((e: Error) => setError(e.message));
@@ -24,28 +31,57 @@ export default function ResultsPage() {
   return (
     <main>
       <TopBar page="results" />
-      {error && <p className="error">{error}</p>}
 
-      {results && (
+      <header className="page-intro">
+        <h1>How GridMend compares</h1>
+        <p className="muted">
+          Each of the {faults.length || 23} line segments on the feeder was faulted in turn, and five
+          methods tried to restore power. Unsafe switching counts as restoring nothing, because protection
+          would trip it.
+        </p>
+      </header>
+
+      {error ? (
+        <Card>
+          {error.includes("no evaluation results") ? (
+            <EmptyState title="No results yet">
+              Run <code>gridmend eval</code> to fault every segment and score each method, then reload this page.
+            </EmptyState>
+          ) : (
+            <EmptyState title="Could not load the results">
+              {error}. Check that the API is running on port 8000, then reload.
+            </EmptyState>
+          )}
+        </Card>
+      ) : !results ? (
+        <Card>
+          <div className="loading" role="status">
+            <Spinner /> Loading the evaluation…
+          </div>
+        </Card>
+      ) : (
         <>
           {ours && (
-            <section className="headline">
+            <section className="headline" aria-label="GridMend at a glance">
               <div className="kpi">
-                <div className="kpi-label">Of the optimum restored</div>
+                <div className="kpi-label">Load restored</div>
                 <div className="kpi-big">{ours.pct_optimal.toFixed(0)}%</div>
                 <div className="muted small">
-                  {Math.round(ours.restored_kw)} of {Math.round(best?.restored_kw ?? ours.restored_kw)} kW across 23 faults
+                  of the best possible: {Math.round(ours.restored_kw)} of{" "}
+                  {Math.round(best?.restored_kw ?? ours.restored_kw)} kW across all faults
                 </div>
               </div>
               <div className="kpi">
-                <div className="kpi-label">Unsafe plans executed</div>
+                <div className="kpi-label">Unsafe plans carried out</div>
                 <div className="kpi-big">{ours.unsafe_plans}</div>
                 <div className="muted small">
-                  {unverified.map((s) => `${s.method}: ${s.unsafe_plans}`).join(", ") || "every plan verified first"}
+                  {unverified.length > 0
+                    ? `vs. ${unverified.map((s) => `${s.unsafe_plans} for ${methodLabel(s.method).toLowerCase()}`).join(", ")}`
+                    : "every plan is checked first"}
                 </div>
               </div>
               <div className="kpi">
-                <div className="kpi-label">Critical loads restored</div>
+                <div className="kpi-label">Critical sites restored</div>
                 <div className="kpi-big">
                   {ours.critical}
                   {best && <span className="muted"> / {best.critical}</span>}
@@ -53,94 +89,110 @@ export default function ResultsPage() {
                 <div className="muted small">hospital, fire station, water pumping, telecom</div>
               </div>
               <div className="kpi">
-                <div className="kpi-label">Mean planning time</div>
+                <div className="kpi-label">Time to a plan</div>
                 <div className="kpi-big">{Math.round(ours.mean_plan_ms)} <span className="muted">ms</span></div>
-                <div className="muted small">per fault, including verification on graph forks</div>
+                <div className="muted small">on average, including every safety check</div>
               </div>
             </section>
           )}
 
-          <section className="card">
-            <div className="card-head">
-              <h2>All 23 single faults</h2>
-              <span className="muted small">IEEE 33-bus feeder, every unswitched segment faulted in turn</span>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>method</th>
-                  <th>restored kW</th>
-                  <th>% of optimal</th>
-                  <th>critical loads</th>
-                  <th>switch ops</th>
-                  <th>violations</th>
-                  <th>unsafe plans</th>
-                  <th>mean planning ms</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.summary.map((s) => (
-                  <tr key={s.method} className={s.method === "gridmend" ? "highlight" : undefined}>
-                    <td>{s.method}</td>
-                    <td>{Math.round(s.restored_kw)}</td>
-                    <td>{s.pct_optimal.toFixed(1)}</td>
-                    <td>{s.critical}</td>
-                    <td>{s.switch_ops}</td>
-                    <td className={s.violations ? "bad" : undefined}>{s.violations}</td>
-                    <td className={s.unsafe_plans ? "bad" : undefined}>{s.unsafe_plans}</td>
-                    <td>{Math.round(s.mean_plan_ms)}</td>
+          <Card title="All methods" hint="Totals across every fault. Hover or tap a method to see how it works">
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Method</th>
+                    <th scope="col">Restored kW</th>
+                    <th scope="col">% of best</th>
+                    <th scope="col">Critical sites</th>
+                    <th scope="col">Switch moves</th>
+                    <th scope="col">
+                      <Term hint="Safety rules broken: a loop, an overloaded line, low voltage, or power into the fault.">
+                        Violations
+                      </Term>
+                    </th>
+                    <th scope="col">Unsafe plans</th>
+                    <th scope="col">Avg. ms</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="muted">
-              Unsafe switching is scored as restoring nothing: protection would trip it. GridMend&apos;s
-              executed configurations are re-checked by an independent networkx and pandapower oracle.
+                </thead>
+                <tbody>
+                  {results.summary.map((s) => (
+                    <tr key={s.method} className={s.method === "gridmend" ? "highlight" : undefined}>
+                      <th scope="row">
+                        {METHODS[s.method] ? <Term hint={METHODS[s.method].hint}>{methodLabel(s.method)}</Term> : s.method}
+                      </th>
+                      <td>{Math.round(s.restored_kw)}</td>
+                      <td>{s.pct_optimal.toFixed(1)}</td>
+                      <td>{s.critical}</td>
+                      <td>{s.switch_ops}</td>
+                      <td className={s.violations ? "bad" : undefined}>{s.violations}</td>
+                      <td className={s.unsafe_plans ? "bad" : undefined}>{s.unsafe_plans}</td>
+                      <td>{Math.round(s.mean_plan_ms)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="muted small">
+              GridMend&apos;s switching is re-checked by an independent networkx and pandapower oracle.
             </p>
-          </section>
+          </Card>
 
-          <section className="card">
-            <div className="card-head">
-              <h2>Restored load against the optimum</h2>
-              <span className="muted small">hover a bar for its value</span>
-            </div>
+          <Card title="Restored load per fault" hint="Faults that leave some load restorable. Hover a bar for its value">
             <ResultsChart rows={results.rows} />
-          </section>
+          </Card>
 
-          <section className="card">
-            <div className="card-head">
-              <h2>Restored kW per fault</h2>
-              <span className="muted small">
-                violations in brackets; greyed rows leave nothing restorable, so even the optimum restores 0 kW
-              </span>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>fault</th>
-                  {methods.map((m) => <th key={m}>{m}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {faults.map((fault) => (
-                  <tr key={fault}
-                    className={results.rows.some((r) => r.fault === fault && r.optimal_kw > 0) ? undefined : "quiet"}>
-                    <td>{fault}</td>
-                    {methods.map((m) => {
-                      const r = results.rows.find((row) => row.fault === fault && row.method === m);
-                      if (!r) return <td key={m}>-</td>;
-                      return (
-                        <td key={m} className={r.violations ? "bad" : undefined}>
-                          {Math.round(r.restored_kw)}
-                          {r.violations > 0 && ` [${r.violations}]`}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
+          <Card
+            title="Every fault in detail"
+            hint="Restored kW per fault and method"
+            actions={
+              <Button
+                variant="secondary"
+                aria-expanded={showFaults}
+                aria-controls="fault-table"
+                onClick={() => setShowFaults((open) => !open)}
+              >
+                {showFaults ? "Hide faults" : `Show all ${faults.length} faults`}
+              </Button>
+            }
+          >
+            {showFaults && (
+              <div id="fault-table">
+                <p className="muted small">
+                  Broken safety rules are in brackets. Greyed rows leave nothing restorable, so even the best
+                  possible restores 0 kW.
+                </p>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">Faulted line</th>
+                        {methods.map((m) => <th key={m} scope="col">{methodLabel(m)}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {faults.map((fault) => (
+                        <tr key={fault}
+                          className={results.rows.some((r) => r.fault === fault && r.optimal_kw > 0) ? undefined : "quiet"}>
+                          <th scope="row">{fault}</th>
+                          {methods.map((m) => {
+                            const r = results.rows.find((row) => row.fault === fault && row.method === m);
+                            if (!r) return <td key={m}>-</td>;
+                            return (
+                              <td key={m} className={r.violations ? "bad" : undefined}>
+                                {Math.round(r.restored_kw)}
+                                {r.violations > 0 && ` [${r.violations}]`}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </Card>
         </>
       )}
     </main>

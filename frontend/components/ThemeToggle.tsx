@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import Button from "@/components/ui/Button";
 import { currentTheme, onThemeChange, setTheme, type Theme } from "@/lib/theme";
 
 export default function ThemeToggle() {
@@ -14,8 +15,9 @@ export default function ThemeToggle() {
 
   const next = theme === "dark" ? "light" : "dark";
   return (
-    <button
-      className="icon-button"
+    <Button
+      variant="secondary"
+      icon
       aria-label={`Switch to ${next} theme`}
       title={`Switch to ${next} theme`}
       onClick={() => setTheme(next)}
@@ -32,6 +34,6 @@ export default function ThemeToggle() {
           <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="currentColor" />
         </svg>
       )}
-    </button>
+    </Button>
   );
 }

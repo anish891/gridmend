@@ -1,3 +1,5 @@
+import Card from "@/components/ui/Card";
+import Spinner from "@/components/ui/Spinner";
 import type { AgentEvent } from "@/lib/api";
 
 type ToolEvent = Extract<AgentEvent, { type: "tool" }>;
@@ -83,11 +85,11 @@ export default function AgentPanel({ model, events, running }: Props) {
   const final = events.find((e) => e.type === "final");
   const error = events.find((e) => e.type === "error");
   return (
-    <section className="card agent-panel">
-      <div className="card-head">
-        <h2>Operator agent</h2>
-        <span className="muted small">{model} · calls the same tools, never executes; you approve</span>
-      </div>
+    <Card
+      className="agent-panel"
+      title="Operator agent"
+      hint={`${model} · calls the same tools, never executes; you approve`}
+    >
       <ol className="agent-log">
         {tools.map((e, i) => {
           const d = describe(e);
@@ -99,12 +101,12 @@ export default function AgentPanel({ model, events, running }: Props) {
         })}
         {running && (
           <li className="thinking">
-            <span className="spinner" /> thinking…
+            <Spinner /> thinking…
           </li>
         )}
       </ol>
-      {error && error.type === "error" && <p className="error">{error.detail}</p>}
+      {error && error.type === "error" && <p className="error" role="alert">{error.detail}</p>}
       {final && final.type === "final" && <Answer text={final.text} />}
-    </section>
+    </Card>
   );
 }
