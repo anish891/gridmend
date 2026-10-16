@@ -30,13 +30,23 @@ export type Line = {
   fi: "set" | "clear" | "none" | null;
   faulted: boolean;
   cap_kva: number;
+  // False when a crew reported the switch jammed; `report` names that crew report.
+  operable: boolean;
+  report: string | null;
   // What depends on this line in the current switching (null when it carries nothing).
   carries: { buses: number; kw: number; critical: string[] } | null;
 };
 
 export type RiskLine = { line: string; unserved_kw: number; restored_kw: number; critical_dark: string[] };
 
-export type Zone = { id: number; energized: boolean; faulted: boolean; p_kw: number };
+// cut_off: a healthy zone isolated with the fault because a jammed switch joins them.
+export type Zone = { id: number; energized: boolean; faulted: boolean; cut_off: boolean; p_kw: number };
+
+export type CrewFinding = { switch_id: string; operable: boolean; evidence: string };
+
+export type CrewReport = { id: string; note: string; other: string; findings: CrewFinding[] };
+
+export type CrewFiling = { report: string; findings: CrewFinding[]; other: string; rejected_plans: string[] };
 
 export type Incident = { id: string; status: string; zone: number } | null;
 
@@ -100,6 +110,8 @@ export type Explanation = {
   critical: CriticalLoad[];
   // The conditions and priorities the incident was handled under (null on a normal day).
   context: { conditions: string; priorities: Priority[] } | null;
+  crew_reports: CrewReport[];
+  cut_off: { zone: number; via: string }[];
   dark_zones: number[];
   load_served_kw: number;
   load_unserved_kw: number;
@@ -206,4 +218,6 @@ export const api = {
   context: () => call<OperatingContext>("GET", "/context"),
   setConditions: (conditions: string) => call<OperatingContext>("POST", "/context", { conditions }),
   clearConditions: () => call<OperatingContext>("DELETE", "/context"),
+  crewReports: () => call<{ reports: CrewReport[] }>("GET", "/crew"),
+  fileCrewReport: (note: string) => call<CrewFiling>("POST", "/crew", { note }),
 };

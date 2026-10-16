@@ -1,5 +1,4 @@
 import json
-from types import SimpleNamespace
 
 import httpx
 import openai
@@ -24,19 +23,6 @@ HEAT = {"priorities": [
     {"facility": "water pumping", "weight": 10, "rule": "2.3"},
     {"facility": "telecom", "weight": 10, "rule": "2.4"},
 ]}
-
-
-class FixedModel:
-    """Stands in for the LLM with one canned reply, keeping the prompt it was sent."""
-
-    def __init__(self, reply: str):
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
-        self.reply = reply
-        self.prompt = ""
-
-    def create(self, **kwargs):
-        self.prompt = kwargs["messages"][0]["content"]
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=self.reply))])
 
 
 def weights(graph) -> dict[str, tuple[int, bool]]:
@@ -65,8 +51,8 @@ def test_facilities_left_out_keep_their_standing_priority():
                        "water pumping": 10, "telecom": 12}
 
 
-def test_heat_advisory_raises_the_cooling_centre_over_the_fire_station(falkordb, graph):
-    model = FixedModel("<think>policy 3.1 and 3.2 apply</think>" + json.dumps(HEAT))
+def test_heat_advisory_raises_the_cooling_centre_over_the_fire_station(falkordb, graph, fixed_model):
+    model = fixed_model("<think>policy 3.1 and 3.2 apply</think>" + json.dumps(HEAT))
     context = set_conditions(graph, model, "test-model", "Heat advisory, 44 C, cooling centre open.")
 
     assert "Heat advisory, 44 C" in model.prompt and "3.2 During a heat advisory" in model.prompt
@@ -87,19 +73,19 @@ def test_heat_advisory_raises_the_cooling_centre_over_the_fire_station(falkordb,
     assert "higher total priority" in fire["reason"]
 
 
-def test_a_bad_reply_changes_nothing(graph):
+def test_a_bad_reply_changes_nothing(graph, fixed_model):
     before = weights(graph)
     with pytest.raises(PolicyError):
-        set_conditions(graph, FixedModel("I would raise the cooling centre."), "m", "heatwave")
+        set_conditions(graph, fixed_model("I would raise the cooling centre."), "m", "heatwave")
     with pytest.raises(PolicyError):
-        set_conditions(graph, FixedModel('{"priorities": [{"facility": "mall", "weight": 9, '
+        set_conditions(graph, fixed_model('{"priorities": [{"facility": "mall", "weight": 9, '
                                          '"rule": "3.1"}]}'), "m", "heatwave")
     assert weights(graph) == before
     assert current_context(graph)["conditions"] is None
 
 
-def test_an_unreachable_model_is_reported_not_raised(graph):
-    class Down(FixedModel):
+def test_an_unreachable_model_is_reported_not_raised(graph, fixed_model):
+    class Down(fixed_model):
         def create(self, **kwargs):
             raise openai.APIConnectionError(request=httpx.Request("POST", "http://llm.test"))
 
@@ -109,16 +95,16 @@ def test_an_unreachable_model_is_reported_not_raised(graph):
     assert weights(graph) == before
 
 
-def test_conditions_are_fixed_during_an_incident(graph):
+def test_conditions_are_fixed_during_an_incident(graph, fixed_model):
     apply_fault(graph, "4-5")
     with pytest.raises(NotHealthyError):
-        set_conditions(graph, FixedModel(json.dumps(HEAT)), "m", "heatwave")
+        set_conditions(graph, fixed_model(json.dumps(HEAT)), "m", "heatwave")
     with pytest.raises(NotHealthyError):
         clear_conditions(graph)
 
 
-def test_clearing_returns_to_standing_priorities(graph):
-    set_conditions(graph, FixedModel(json.dumps(HEAT)), "m", "heatwave")
+def test_clearing_returns_to_standing_priorities(graph, fixed_model):
+    set_conditions(graph, fixed_model(json.dumps(HEAT)), "m", "heatwave")
     context = clear_conditions(graph)
 
     assert context["conditions"] is None

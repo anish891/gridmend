@@ -121,7 +121,8 @@ def write_graph(db: FalkorDB) -> dict:
         UNWIND $rows AS r
         MATCH (a:Bus {id: r.a}), (b:Bus {id: r.b})
         CREATE (a)-[:SW {id: r.id, kind: r.kind, status: r.status, normally: r.normally,
-                         r_ohm: r.r_ohm, x_ohm: r.x_ohm, cap_kva: r.cap_kva, fi: r.fi}]->(b)
+                         r_ohm: r.r_ohm, x_ohm: r.x_ohm, cap_kva: r.cap_kva, fi: r.fi,
+                         operable: true}]->(b)
         """,
         {"rows": switches},
     )

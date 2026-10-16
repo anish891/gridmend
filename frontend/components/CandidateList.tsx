@@ -27,6 +27,7 @@ const VIOLATION_LABEL: Record<string, string> = {
   radiality: "Creates a loop",
   capacity: "Overloads a line",
   voltage: "Voltage too low",
+  operability: "Uses a jammed switch",
 };
 
 const V_MIN = 0.9;

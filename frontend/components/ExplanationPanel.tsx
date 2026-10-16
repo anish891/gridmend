@@ -11,6 +11,14 @@ export default function ExplanationPanel({ e }: { e: Explanation }) {
             A fault on line <b>{e.fault_line}</b> was located in <b>Z{e.faulted_zone}</b> and isolated by{" "}
             {e.isolation.join(", ")}.
           </p>
+          {e.cut_off.map((c) => (
+            <p key={c.zone} className="callout warn">
+              <span>
+                Switch <b>{c.via}</b> was reported jammed closed, so <b>Z{c.zone}</b> could not be separated
+                from the fault and was isolated with it.
+              </span>
+            </p>
+          ))}
           {e.plan ? (
             <>
               <p>
@@ -56,6 +64,23 @@ export default function ExplanationPanel({ e }: { e: Explanation }) {
                     <b>{p.facility}</b> {p.weight}
                     {p.weight !== p.standing && <span className="muted"> (normally {p.standing})</span>}
                     <div className="small muted">{p.rule}</div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {e.crew_reports.length > 0 && (
+            <>
+              <h3>Field crew reports</h3>
+              <ul className="priority-list">
+                {e.crew_reports.map((r) => (
+                  <li key={r.id}>
+                    <b>{r.id}</b> <span className="muted">&ldquo;{r.note}&rdquo;</span>
+                    {r.findings.map((f) => (
+                      <div key={f.switch_id} className="small">
+                        {f.switch_id}: {f.operable ? "works again" : "jammed"}
+                      </div>
+                    ))}
                   </li>
                 ))}
               </ul>

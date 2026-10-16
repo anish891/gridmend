@@ -3,6 +3,7 @@ from collections.abc import Callable
 from falkordb import FalkorDB, Graph
 
 from gridmend.flisr.candidates import Candidate, generate_candidates
+from gridmend.flisr.crew import crew_reports, jammed_switches
 from gridmend.flisr.execute import ExecuteError, execute_plan, verified_plans
 from gridmend.flisr.explain import explain_incident
 from gridmend.flisr.isolate import IsolateError, isolate
@@ -36,7 +37,8 @@ SWITCH_LIST = {"type": "array", "items": {"type": "string"}}
 SCHEMAS = [
     schema("operating_context", "Today's operating conditions as reported by the operator, the "
                                 "priority weight of every facility for this incident with the "
-                                "policy rule behind it, and the full restoration priority policy."),
+                                "policy rule behind it, the full restoration priority policy, "
+                                "and field crew reports with the switches they found jammed."),
     schema("grid_status", "Energized, dark and faulted zones, switch states and load served."),
     schema("locate_fault", "Find the faulted zone from the fault indicator chain."),
     schema("line_dependencies", "For each energized line, the buses, load (kW) and critical "
@@ -103,6 +105,8 @@ class GridTools:
             "priorities": [{k: p[k] for k in ("facility", "zone", "weight", "rule")}
                            for p in context["priorities"]],
             "policy": load_policy(),
+            "jammed_switches": jammed_switches(self.g),
+            "crew_reports": [{"id": r["id"], "note": r["note"]} for r in crew_reports(self.g)],
         }
 
     def grid_status(self) -> dict:
@@ -114,6 +118,7 @@ class GridTools:
             "load_served_kw": round(s["served_kw"]),
             "total_load_kw": round(s["total_kw"]),
             "switches": {sw["id"]: f"{sw['kind']} {sw['status']}, fi {sw['fi']}"
+                                   + ("" if sw["operable"] else ", JAMMED")
                          for sw in s["switches"]},
         }
 
@@ -127,7 +132,12 @@ class GridTools:
 
     def isolation_plan(self) -> dict:
         incident_id, ops = isolate(self.g)
-        return {"incident": incident_id, "executed": [f"{o.op} {o.switch_id}" for o in ops]}
+        cut_off = self.g.ro_query(
+            "MATCH (:Incident {id: $id})-[c:CUTS_OFF]->(z:Zone) RETURN z.id, c.via ORDER BY z.id",
+            {"id": incident_id},
+        ).result_set
+        return {"incident": incident_id, "executed": [f"{o.op} {o.switch_id}" for o in ops],
+                "cut_off_with_fault": [{"zone": z, "jammed_switch": via} for z, via in cut_off]}
 
     def restoration_candidates(self) -> dict:
         self.incident_id()

@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from gridmend import db
 from gridmend.config import load_settings
 from gridmend.flisr.candidates import load_screens, plan_restoration
+from gridmend.flisr.crew import CrewError, CrewModelError, crew_reports, file_report
 from gridmend.flisr.execute import ExecuteError, execute_plan, verified_plans
 from gridmend.flisr.explain import explain_incident
 from gridmend.flisr.isolate import IsolateError, isolate
@@ -71,6 +72,10 @@ class ContextRequest(BaseModel):
     conditions: str
 
 
+class CrewRequest(BaseModel):
+    note: str
+
+
 def live():
     return db.connect().select_graph(GRAPH_NAME)
 
@@ -96,12 +101,15 @@ def state() -> dict:
         """
         MATCH (a:Bus)-[r:SEG|SW]->(b:Bus)
         RETURN r.id, a.id, b.id, type(r), r.kind, r.status, r.normally, r.fi, r.faulted,
-               r.cap_kva
+               r.cap_kva, coalesce(r.operable, true), r.report
         ORDER BY r.id
         """
     ).result_set
     zones = g.ro_query(
-        "MATCH (z:Zone) RETURN z.id, z.energized, z.faulted, z.p_kw ORDER BY z.id"
+        """
+        MATCH (z:Zone)
+        RETURN z.id, z.energized, z.faulted, coalesce(z.cut_off, false), z.p_kw ORDER BY z.id
+        """
     ).result_set
     status = grid_status(g)
     carried = {d["line"]: d for d in line_dependencies(g)}
@@ -115,12 +123,12 @@ def state() -> dict:
             {"id": lid, "from": a, "to": b, "type": "switch" if t == "SW" else "segment",
              "kind": kind or "segment", "status": status_ or "closed", "normally": normally,
              "fi": fi, "faulted": bool(faulted), "cap_kva": cap,
-             "carries": carried.get(lid)}
-            for lid, a, b, t, kind, status_, normally, fi, faulted, cap in lines
+             "operable": operable, "report": report, "carries": carried.get(lid)}
+            for lid, a, b, t, kind, status_, normally, fi, faulted, cap, operable, report in lines
         ],
         "zones": [
-            {"id": z, "energized": on, "faulted": faulted, "p_kw": p_kw}
-            for z, on, faulted, p_kw in zones
+            {"id": z, "energized": on, "faulted": faulted, "cut_off": cut_off, "p_kw": p_kw}
+            for z, on, faulted, cut_off, p_kw in zones
         ],
         "served_kw": status["served_kw"],
         "total_kw": status["total_kw"],
@@ -164,7 +172,10 @@ def plan() -> dict:
         raise HTTPException(409, f"incident is {incident['status']}, not isolated")
 
     results = plan_restoration(conn, g, incident["id"])
-    ranked = verified_plans(g, incident["id"])
+    # Recommend from this round only: planning again (e.g. after a crew report) leaves the
+    # earlier plans in the trace, and the operator chooses from the list just shown.
+    current = {r.plan_id for _, r in results}
+    ranked = [p for p in verified_plans(g, incident["id"]) if p["id"] in current]
     critical = {p["id"]: p["critical"] for p in ranked}
     return {
         "incident": incident["id"],
@@ -360,6 +371,30 @@ def set_context(request: ContextRequest) -> dict:
     except ModelError as exc:
         raise HTTPException(503, str(exc))
     except PolicyError as exc:
+        raise HTTPException(422, str(exc))
+    finally:
+        _agent_lock.release()
+
+
+@app.get("/crew")
+def crew() -> dict:
+    return {"reports": crew_reports(live())}
+
+
+@app.post("/crew")
+def file_crew_report(request: CrewRequest) -> dict:
+    # The LLM reads the note; a finding only reaches the graph if it names a real switch and
+    # quotes the note.
+    if not load_settings().llm_configured:
+        raise HTTPException(503, "no language model is configured")
+    if not _agent_lock.acquire(blocking=False):
+        raise HTTPException(429, "the model is busy with another request; try again shortly")
+    try:
+        client, model = agent_client()
+        return file_report(live(), client, model, request.note)
+    except CrewModelError as exc:
+        raise HTTPException(503, str(exc))
+    except CrewError as exc:
         raise HTTPException(422, str(exc))
     finally:
         _agent_lock.release()

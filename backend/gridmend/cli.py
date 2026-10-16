@@ -408,6 +408,38 @@ def cmd_context(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_crew(args: argparse.Namespace) -> int:
+    from gridmend.flisr.crew import CrewError, crew_reports, file_report, jammed_switches
+    from gridmend.grid.load import LIVE_GRAPH
+
+    g = db.connect().select_graph(LIVE_GRAPH)
+    if args.note:
+        from gridmend.agent.llm import make_client
+
+        client, model = make_client()
+        try:
+            result = file_report(g, client, model, args.note)
+        except CrewError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print(f"filed {result['report']}")
+        for f in result["findings"]:
+            state = "works" if f["operable"] else "JAMMED"
+            print(f"  {f['switch_id']}: {state}  (\"{f['evidence']}\")")
+        if result["other"]:
+            print(f"  also reported: {result['other']}")
+        if result["rejected_plans"]:
+            print(f"  plans that can no longer run: {', '.join(result['rejected_plans'])}")
+        return 0
+
+    for r in crew_reports(g):
+        print(f"{r['id']}: {r['note']}")
+    jammed = jammed_switches(g)
+    print("jammed switches: " + (", ".join(f"{s['id']} (stuck {s['stuck']}, {s['report']})"
+                                           for s in jammed) or "none"))
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     from gridmend.sim import reset
 
@@ -440,6 +472,11 @@ def build_parser() -> argparse.ArgumentParser:
     fault.set_defaults(func=cmd_fault)
 
     sub.add_parser("reset", help="restore grid_live from grid_base").set_defaults(func=cmd_reset)
+
+    crew = sub.add_parser("crew", help="file a field crew's note; the LLM reads which switches "
+                                       "are jammed or repaired")
+    crew.add_argument("note", nargs="?", help="the crew's note as written; omit to list reports")
+    crew.set_defaults(func=cmd_crew)
 
     context = sub.add_parser("context", help="set today's conditions; the LLM applies the "
                                               "restoration policy to them")

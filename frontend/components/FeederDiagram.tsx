@@ -63,9 +63,14 @@ function describe(
   if (kind === "bus") {
     const bus = state.buses.find((b) => `${b.id}` === id)!;
     if (bus.is_source) return { title: "Substation", lines: ["bus 1, feeder source"] };
+    const cutOff = state.zones.some((z) => z.id === bus.zone && z.cut_off);
     return {
       title: bus.facility ? `Bus ${bus.id}: ${bus.facility}` : `Bus ${bus.id}`,
-      lines: [`zone Z${bus.zone}, ${Math.round(bus.p_kw)} kW`, bus.energized ? "energized" : "de-energized"],
+      lines: [
+        `zone Z${bus.zone}, ${Math.round(bus.p_kw)} kW`,
+        bus.energized ? "energized" : "de-energized",
+        ...(cutOff ? ["cut out with the fault: a jammed switch joins this zone to it"] : []),
+      ],
     };
   }
   const line = state.lines.find((l) => l.id === id)!;
@@ -91,6 +96,7 @@ function describe(
       `${line.status}${line.status !== line.normally ? ` (normally ${line.normally})` : ""}`,
       ...(line.fi && line.fi !== "none" ? [`fault indicator: ${line.fi}`] : []),
       `rated ${line.cap_kva} kVA`,
+      ...(line.operable ? [] : [`JAMMED: cannot be operated${line.report ? ` (crew report ${line.report})` : ""}`]),
       ...carriesText(line),
     ],
   };
@@ -105,10 +111,12 @@ function midpoint(line: Line): [number, number] {
 
 export function toElements(state: GridState): ElementDefinition[] {
   const faultedZones = new Set(state.zones.filter((z) => z.faulted).map((z) => z.id));
+  const cutOffZones = new Set(state.zones.filter((z) => z.cut_off).map((z) => z.id));
   const energized = new Map(state.buses.map((b) => [b.id, b.energized]));
   const busState = (id: number) => {
     const bus = state.buses.find((b) => b.id === id)!;
     if (bus.zone !== null && faultedZones.has(bus.zone)) return "faulted";
+    if (bus.zone !== null && cutOffZones.has(bus.zone)) return "cut-off";
     return bus.energized ? "live" : "dark";
   };
 
@@ -149,10 +157,11 @@ export function toElements(state: GridState): ElementDefinition[] {
     const sw = `s${line.id}`;
     elements.push({
       group: "nodes",
-      data: { id: sw, label: line.id, kind: "line", ref: line.id },
+      data: { id: sw, label: line.operable ? line.id : `${line.id} jammed`, kind: "line", ref: line.id },
       position: { x, y },
       // A switch on a vertical lateral is labelled beside the line instead of on it.
       classes: `switch ${line.kind} ${line.status} fi-${line.fi}`
+        + (line.operable ? "" : " jammed")
         + (BUS_POSITIONS[line.from][0] === BUS_POSITIONS[line.to][0] ? " vertical" : ""),
     });
     for (const [bus, side] of [[from, "a"], [to, "b"]] as const) {
@@ -210,6 +219,11 @@ const styleFor = (COLORS: Colors): cytoscape.StylesheetJson => [
   },
   { selector: "node.live", style: { "background-color": COLORS.live } },
   { selector: "node.faulted", style: { "background-color": COLORS.faulted } },
+  // Healthy but isolated with the fault because a jammed switch joins them.
+  {
+    selector: "node.cut-off",
+    style: { "background-color": COLORS.faulted, "background-opacity": 0.35 },
+  },
   {
     selector: "node.critical",
     style: { shape: "star", width: 28, height: 28, "font-weight": "bold", "font-size": 14 },
@@ -239,6 +253,13 @@ const styleFor = (COLORS: Colors): cytoscape.StylesheetJson => [
   { selector: "node.switch.tie", style: { "font-size": 10, color: COLORS.faint } },
   { selector: "node.switch.breaker", style: { width: 16, height: 16 } },
   { selector: "node.switch.fi-set", style: { "border-color": COLORS.fi, "border-width": 3 } },
+  {
+    selector: "node.switch.jammed",
+    style: {
+      "border-color": COLORS.faulted, "border-width": 4, width: 16, height: 16,
+      color: COLORS.faulted, "font-weight": "bold",
+    },
+  },
   {
     selector: "edge",
     style: {

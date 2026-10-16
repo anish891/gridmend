@@ -55,7 +55,11 @@ def grid_status(g: Graph) -> dict:
         "MATCH (z:Zone) RETURN z.id, z.energized, z.faulted, z.p_kw ORDER BY z.id"
     ).result_set
     switches = g.ro_query(
-        "MATCH ()-[s:SW]->() RETURN s.id, s.kind, s.status, s.normally, s.fi ORDER BY s.kind, s.id"
+        """
+        MATCH ()-[s:SW]->()
+        RETURN s.id, s.kind, s.status, s.normally, s.fi, coalesce(s.operable, true)
+        ORDER BY s.kind, s.id
+        """
     ).result_set
     dark_buses = g.ro_query(
         "MATCH (b:Bus) WHERE NOT b.energized RETURN b.id ORDER BY b.id"
@@ -72,7 +76,7 @@ def grid_status(g: Graph) -> dict:
         "faulted_zones": [z for z, _, faulted, _ in zones if faulted],
         "dark_buses": [b for (b,) in dark_buses],
         "switches": [
-            dict(zip(("id", "kind", "status", "normally", "fi"), row)) for row in switches
+            dict(zip(("id", "kind", "status", "normally", "fi", "operable"), row)) for row in switches
         ],
         "served_kw": served_kw,
         "total_kw": total_kw,

@@ -45,6 +45,15 @@ def record_incident(g: Graph, zone: int) -> str:
         """,
         {"id": incident_id},
     )
+    # Crew reports filed before the fault (e.g. a switch found jammed on patrol) apply to it too.
+    g.query(
+        """
+        MATCH (i:Incident {id: $id}), (r:CrewReport)
+        WHERE NOT ()-[:HAS_REPORT]->(r)
+        CREATE (i)-[:HAS_REPORT]->(r)
+        """,
+        {"id": incident_id},
+    )
     return incident_id
 
 

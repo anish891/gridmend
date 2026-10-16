@@ -4,11 +4,17 @@ from falkordb import Graph
 
 # Each line becomes a pair of FLOW edges, one per direction, because maxFlow follows edge
 # direction and takes a single relationship type. Every healthy load bus drains into one sink
-# through an edge rated at its own demand.
+# through an edge rated at its own demand. Zones cut out with the fault go too, and a switch
+# jammed open can never carry anything.
 FLOW_NETWORK = [
-    "MATCH (b:Bus)-[:IN_ZONE]->(:Zone {faulted: true}) DETACH DELETE b",
+    """
+    MATCH (b:Bus)-[:IN_ZONE]->(z:Zone)
+    WHERE z.faulted OR coalesce(z.cut_off, false)
+    DETACH DELETE b
+    """,
     """
     MATCH (a:Bus)-[r:SEG|SW]->(b:Bus)
+    WHERE NOT (type(r) = 'SW' AND NOT coalesce(r.operable, true) AND r.status = 'open')
     CREATE (a)-[:FLOW {id: r.id, cap_kva: r.cap_kva}]->(b),
            (b)-[:FLOW {id: r.id, cap_kva: r.cap_kva}]->(a)
     """,

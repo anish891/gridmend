@@ -903,17 +903,6 @@ button:disabled {
 
 .conditions-form label { font-weight: 500; }
 
-.conditions-form textarea {
-  width: 100%;
-  font: inherit;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
-  resize: vertical;
-}
-
 .conditions-result p { margin: 0; }
 
 .conditions-result {
@@ -943,6 +932,81 @@ button:disabled {
   display: grid;
   gap: var(--space-2);
 }
+
+/* Field crew report */
+
+.side {
+  display: grid;
+  min-width: 0;
+}
+
+.crew-form {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.crew-form label { font-weight: 500; }
+
+.crew-form textarea,
+.conditions-form textarea {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  resize: vertical;
+}
+
+.crew-examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.crew-example {
+  font-size: var(--fs-sm);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.crew-example:hover { color: var(--text); border-color: var(--border-strong); }
+
+.crew-result {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.crew-result p,
+.crew-jammed { margin: 0; }
+
+.crew-findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--fs-md);
+}
+
+.crew-jammed {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  color: var(--faulted-text);
+}
+
+.callout.warn { background: var(--warn-soft); }
+
+.box.jammed { border-color: var(--faulted); border-width: 3px; background: var(--text); }
+.swatch.cut-off { background: var(--faulted); opacity: 0.35; }
 
 /* How it works */
 

@@ -27,6 +27,10 @@ Work in this order:
    numbers), which critical sites are restored or still dark and why, and why the main
    alternatives were rejected. Use only facts returned by the tools.
 
+Switches a field crew reported jammed cannot be operated. Isolation and the candidates already
+work around them; tell the operator what each jam cost (zones cut out with the fault, plans
+that could not be used).
+
 If no candidate passes verification, do not execute anything; explain why instead."""
 
 # In the web UI the agent advises and the operator executes, so it never gets execute_plan.
@@ -50,6 +54,10 @@ Work in this order:
    what faulted and what was isolated, the plan you recommend and why, which critical sites it
    restores and which stay dark and why, and why the main alternatives were rejected. Use only
    facts returned by the tools.
+
+Switches a field crew reported jammed cannot be operated. Isolation and the candidates already
+work around them; tell the operator what each jam cost (zones cut out with the fault, plans
+that could not be used).
 
 If no candidate passes verification, recommend nothing and explain why."""
 

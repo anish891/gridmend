@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import AgentPanel from "@/components/AgentPanel";
 import CandidateList from "@/components/CandidateList";
 import Conditions from "@/components/Conditions";
+import CrewReport from "@/components/CrewReport";
 import ExplanationPanel from "@/components/ExplanationPanel";
 import FaultPicker, { type Mode } from "@/components/FaultPicker";
 import FeederDiagram, { RISK_STEPS, type Pulse, type Risk } from "@/components/FeederDiagram";
@@ -19,8 +20,8 @@ import EmptyState from "@/components/ui/EmptyState";
 import Segmented from "@/components/ui/Segmented";
 import Term from "@/components/ui/Term";
 import {
-  api, runAgent, type AgentEvent, type Explanation, type GridState, type Location, type OperatingContext,
-  type PlanResult, type SwitchOp, type Trace,
+  api, runAgent, type AgentEvent, type CrewFiling, type Explanation, type GridState, type Location,
+  type OperatingContext, type PlanResult, type SwitchOp, type Trace,
 } from "@/lib/api";
 import { problemsFor, withSwitch } from "@/lib/overlay";
 
@@ -53,6 +54,9 @@ export default function Home() {
   const [context, setContext] = useState<OperatingContext | null>(null);
   const [contextBusy, setContextBusy] = useState(false);
   const [contextError, setContextError] = useState<string | null>(null);
+  const [crewBusy, setCrewBusy] = useState(false);
+  const [crewError, setCrewError] = useState<string | null>(null);
+  const [crewResult, setCrewResult] = useState<CrewFiling | null>(null);
   const [risk, setRisk] = useState<Risk | null>(null);
   const [showRisk, setShowRisk] = useState(false);
 
@@ -228,6 +232,23 @@ export default function Home() {
     }
   }, [refresh]);
 
+  const fileCrewReport = useCallback(async (note: string) => {
+    setCrewBusy(true);
+    setCrewError(null);
+    try {
+      const filed = await api.fileCrewReport(note);
+      setCrewResult(filed);
+      const next = await refresh();
+      if (next.incident) setTrace(await api.trace());
+      // A jam found after plans were checked: plan again around it.
+      if (next.incident?.status === "isolated" && plan) await run("plan");
+    } catch (e) {
+      setCrewError((e as Error).message);
+    } finally {
+      setCrewBusy(false);
+    }
+  }, [refresh, plan, run]);
+
   const resetGrid = useCallback(async () => {
     setError(null);
     working(STEP.fault, "Restoring the healthy feeder");
@@ -241,6 +262,8 @@ export default function Home() {
       setTrace(null);
       setExplanation(null);
       setAgentEvents([]);
+      setCrewResult(null);
+      setCrewError(null);
       await refresh();
       // A reset copies the pristine grid, which carries no conditions.
       setContext(await api.context());
@@ -315,7 +338,7 @@ export default function Home() {
       {error && <p className="error" role="alert">{error}</p>}
       {picking ? (
         <FaultPicker
-          disabled={busy !== null || contextBusy}
+          disabled={busy !== null || contextBusy || crewBusy}
           onFault={(line) => run("fault", line)}
           agentModel={agentModel}
           mode={mode}
@@ -363,7 +386,7 @@ export default function Home() {
               pulse={pulse}
               problems={problems}
               risk={showRisk ? risk : null}
-              onSegmentClick={healthy && !busy && !contextBusy ? (line) => run("fault", line) : undefined}
+              onSegmentClick={healthy && !busy && !contextBusy && !crewBusy ? (line) => run("fault", line) : undefined}
             />
           )}
           {showRisk && (
@@ -392,6 +415,10 @@ export default function Home() {
               </Term>
             </li>
             <li><span className="star">★</span> critical site</li>
+            {state?.lines.some((l) => !l.operable) && <li><span className="box jammed" /> jammed switch</li>}
+            {state?.zones.some((z) => z.cut_off) && (
+              <li><span className="swatch cut-off" /> cut out with the fault</li>
+            )}
             {!healthy && (
               <>
                 <li><span className="swatch faulted" /> faulted zone</li>
@@ -413,11 +440,23 @@ export default function Home() {
           </ul>
         </Card>
 
-        {healthy ? (
-          <Intro />
-        ) : (
-          <Timeline fault={fault} location={location} trace={trace} conditions={context?.conditions ?? null} />
-        )}
+        <div className="side">
+          {healthy ? (
+            <Intro />
+          ) : (
+            <Timeline fault={fault} location={location} trace={trace} conditions={context?.conditions ?? null} />
+          )}
+          {agentModel && state && status !== "restored" && (
+            <CrewReport
+              jammed={state.lines.filter((l) => !l.operable)}
+              busy={crewBusy}
+              error={crewError}
+              result={crewResult}
+              disabled={busy !== null}
+              onFile={fileCrewReport}
+            />
+          )}
+        </div>
       </div>
 
       {(agentRunning || agentEvents.length > 0) && (

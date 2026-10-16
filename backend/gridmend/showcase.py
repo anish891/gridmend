@@ -7,7 +7,7 @@ from falkordb import Graph
 
 from gridmend.flisr.candidates import TIE_FEEDS_QUERY
 from gridmend.flisr.explain import FEEDING_PATH_QUERY
-from gridmend.flisr.isolate import BOUNDARY_QUERY, faulted_zone
+from gridmend.flisr.isolate import BOUNDARY_QUERY, faulted_zone, isolation_region
 from gridmend.flisr.locate import LOCATE_QUERY
 from gridmend.flisr.trace import TRACE_QUERY, open_incident
 from gridmend.flisr.transfer import TRANSFER_QUERY, build_flow_network
@@ -37,8 +37,9 @@ STEPS = [
      "The faulted zone is the one whose upstream indicator is set while every downstream "
      "indicator is clear.", LOCATE_QUERY, None),
     ("isolate", "Isolate", "Isolation boundary",
-     "Every closed switch with exactly one end in the faulted zone is opened.",
-     BOUNDARY_QUERY, "zone"),
+     "Every closed switch with exactly one end in the faulted zone is opened. A zone joined "
+     "to it by a switch a crew reported jammed is cut out with it.",
+     BOUNDARY_QUERY, "region"),
     ("options", "Plan", "Restoration options",
      "Dead healthy zones that a normally open tie connects to a live zone, heaviest first.",
      TIE_FEEDS_QUERY, None),
@@ -108,14 +109,15 @@ def run_on_fork(g: Graph, setup, query: str):
 
 def run_steps(g: Graph) -> list[dict]:
     incident = open_incident(g)
+    zone = faulted_zone(g)
     available = {
         None: {},
-        "zone": {"zone": faulted_zone(g)},
+        "region": {"zones": sorted(isolation_region(g, zone)) if zone is not None else None},
         "path_zone": {"zone": path_zone(g)},
         "incident": {"id": incident["id"] if incident else None},
     }
     missing = {
-        "zone": "needs a located fault: fault a line first",
+        "region": "needs a located fault: fault a line first",
         "path_zone": "needs an energized zone",
         "incident": "needs an incident: fault a line first",
     }

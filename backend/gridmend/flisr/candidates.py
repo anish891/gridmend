@@ -47,6 +47,9 @@ class Situation:
 TIE_FEEDS_QUERY = """
 MATCH (d:Zone {energized: false, faulted: false})-[b:BOUNDARY {kind: 'tie'}]-
       (:Zone {energized: true, faulted: false})
+WHERE NOT coalesce(d.cut_off, false)
+MATCH ()-[s:SW {id: b.switch_id}]->()
+WHERE coalesce(s.operable, true)
 RETURN d.id AS dead_zone, b.switch_id AS tie
 ORDER BY d.weighted_kw DESC, b.switch_id
 """
@@ -57,17 +60,22 @@ def read_situation(g: Graph) -> Situation:
         "MATCH ()-[s:SW {status: 'closed'}]->() RETURN s.id"
     ).result_set}
     zones = g.ro_query(
-        "MATCH (z:Zone {faulted: false}) RETURN z.id, z.energized, z.p_kw, z.weighted_kw"
+        """
+        MATCH (z:Zone {faulted: false}) WHERE NOT coalesce(z.cut_off, false)
+        RETURN z.id, z.energized, z.p_kw, z.weighted_kw
+        """
     ).result_set
     # Decision variables: open ties and closed sectionalizers touching a dead healthy zone.
-    # Isolation switches border the faulted zone and are never touched.
+    # Isolation switches border the faulted zone, or a zone cut out with it, and are never
+    # touched; nor is a switch a crew reported jammed.
     switches = g.ro_query(
         """
         MATCH (a:Zone)-[b:BOUNDARY]-(d:Zone {energized: false, faulted: false})
-        WHERE NOT a.faulted
+        WHERE NOT a.faulted AND NOT coalesce(a.cut_off, false) AND NOT coalesce(d.cut_off, false)
         MATCH ()-[s:SW {id: b.switch_id}]->()
-        WHERE (s.kind = 'tie' AND s.status = 'open')
-           OR (s.kind = 'sectionalizer' AND s.status = 'closed')
+        WHERE coalesce(s.operable, true)
+          AND ((s.kind = 'tie' AND s.status = 'open')
+               OR (s.kind = 'sectionalizer' AND s.status = 'closed'))
         RETURN DISTINCT s.id, s.kind
         """
     ).result_set

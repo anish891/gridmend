@@ -84,7 +84,7 @@ def test_queries_run_live_and_follow_the_incident(client):
     client.post("/locate")
     client.post("/isolate")
     isolated = {q["key"]: q for q in client.get("/queries").json()["steps"]}
-    assert isolated["isolate"]["params"] == {"zone": 3}
+    assert isolated["isolate"]["params"] == {"zones": [3]}
     assert isolated["options"]["rows"] == [[7, "8-21"], [10, "12-22"]]
     assert isolated["trace"]["rows"][0][:3] == ["inc1-iso", "isolation", "executed"]
 
@@ -225,3 +225,25 @@ def test_risk_map_comes_from_the_evaluation(client, tmp_path, monkeypatch):
     assert client.get("/risk").json()["lines"] == [
         {"line": "4-5", "unserved_kw": 2405.0, "restored_kw": 850.0,
          "critical_dark": ["water pumping", "telecom"]}]
+
+
+def test_planning_again_after_a_jam_recommends_from_the_new_round(client, graph, fixed_model, monkeypatch):
+    client.post("/fault", json={"line": "4-5"})
+    client.post("/locate")
+    client.post("/isolate")
+    first = client.post("/plan").json()
+    assert "8-21" in {o["switch_id"] for c in first["candidates"] if c["plan_id"] == first["recommended"]
+                      for o in c["ops"]}
+
+    reply = json.dumps({"findings": [{"switch": "8-21", "operable": False, "evidence": "seized"}]})
+    monkeypatch.setenv("LLM_API_KEY", "test")
+    monkeypatch.setattr(api, "agent_client", lambda: (fixed_model(reply), "m"))
+    filed = client.post("/crew", json={"note": "The 8-21 tie is seized."}).json()
+    assert filed["rejected_plans"] == [first["recommended"]]
+
+    again = client.post("/plan").json()
+    ids = {c["plan_id"] for c in again["candidates"]}
+    assert again["recommended"] in ids
+    assert all(o["switch_id"] != "8-21" for c in again["candidates"] for o in c["ops"])
+    state = client.get("/state").json()
+    assert next(l for l in state["lines"] if l["id"] == "8-21")["operable"] is False

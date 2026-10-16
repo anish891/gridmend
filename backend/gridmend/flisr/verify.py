@@ -55,6 +55,18 @@ def check_isolation(fork: Graph) -> list[tuple[str, str]]:
     return [("isolation", f"faulted Z{z} energized at buses {buses}") for z, buses in rows]
 
 
+def check_operability(live: Graph, ops: list[SwitchOp]) -> list[tuple[str, str]]:
+    rows = live.ro_query(
+        """
+        MATCH ()-[s:SW]->() WHERE s.id IN $ids AND s.operable = false
+        RETURN s.id, s.report ORDER BY s.id
+        """,
+        {"ids": [o.switch_id for o in ops]},
+    ).result_set
+    return [("operability", f"{switch} is jammed and cannot be operated"
+             + (f" (crew report {report})" if report else "")) for switch, report in rows]
+
+
 def check_connectivity(fork: Graph, claims: list[int]) -> list[tuple[str, str]]:
     rows = fork.ro_query(
         "MATCH (z:Zone {energized: false}) WHERE z.id IN $claims RETURN z.id ORDER BY z.id",
@@ -187,7 +199,8 @@ def verify_plan(
     try:
         apply_switch_ops(fork, [(o.switch_id, o.op) for o in ops])
         keep_conducting_edges(fork)
-        result.violations = check_isolation(fork) + check_connectivity(fork, result.claims)
+        result.violations = (check_operability(live, ops) + check_isolation(fork)
+                             + check_connectivity(fork, result.claims))
         radiality = check_radiality(fork)
         result.violations += radiality
         if not radiality:

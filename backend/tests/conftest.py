@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from gridmend import db
@@ -28,3 +30,21 @@ def graph(falkordb):
     g = falkordb.select_graph(BASE_GRAPH).copy(TEST_GRAPH)
     yield g
     g.delete()
+
+
+class FixedModel:
+    """Stands in for the LLM with one canned reply, keeping the prompt it was sent."""
+
+    def __init__(self, reply: str):
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+        self.reply = reply
+        self.prompt = ""
+
+    def create(self, **kwargs):
+        self.prompt = kwargs["messages"][0]["content"]
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=self.reply))])
+
+
+@pytest.fixture
+def fixed_model():
+    return FixedModel
