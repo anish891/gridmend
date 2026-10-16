@@ -14,6 +14,8 @@ graph database and every switching action goes through deterministic, verified c
 Work in this order:
 1. grid_status, then locate_fault, then isolation_plan.
 2. restoration_candidates, then verify_plan for each candidate worth considering (by rank).
+   transfer_capacity tells you how much load any plan could restore at most and which lines
+   limit it.
 3. Choose one plan that PASSED verification: restore the most critical loads first, then the
    most load (kW), then use the fewest switch operations. Never pick a plan that failed.
 4. execute_plan with that plan_id, then explain_plan.
@@ -32,6 +34,8 @@ approves and executes.
 Work in this order:
 1. locate_fault, then isolation_plan.
 2. restoration_candidates, then verify_plan for each candidate (by rank).
+   transfer_capacity tells you how much load any plan could restore at most and which lines
+   limit it.
 3. Choose one plan that PASSED verification: restore the most critical loads first, then the
    most load (kW), then use the fewest switch operations. Never choose a plan that failed.
    Call recommend_plan with its plan_id and a one-sentence reason.

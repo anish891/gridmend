@@ -63,21 +63,40 @@ def check_connectivity(fork: Graph, claims: list[int]) -> list[tuple[str, str]]:
     return [("connectivity", f"Z{z} is claimed but stays dark") for (z,) in rows]
 
 
+def keep_conducting_edges(fork: Graph) -> None:
+    # Graph algorithms filter by relationship type, not property, so the fork drops its open
+    # switches and becomes the conducting network itself. Ties weigh more so the spanning
+    # tree leaves them out first and a loop is reported at the tie that closed it.
+    fork.query("MATCH ()-[s:SW {status: 'open'}]->() DELETE s")
+    fork.query(
+        "MATCH ()-[r:SEG|SW]->() SET r.tree_weight = CASE WHEN r.kind = 'tie' THEN 1 ELSE 0 END"
+    )
+
+
+RADIALITY_QUERY = """
+MATCH (s:Bus {is_source: true})
+CALL algo.MSF({nodeLabels: ['Bus'], relationshipTypes: ['SEG', 'SW'],
+               weightAttribute: 'tree_weight'})
+YIELD nodes, edges
+WITH s, nodes, edges WHERE s IN nodes
+WITH nodes, [e IN edges | e.id] AS tree
+OPTIONAL MATCH (a:Bus)-[r:SEG|SW]->(:Bus)
+WHERE a IN nodes AND NOT r.id IN tree
+RETURN size(nodes) AS energized_buses, collect(r.id) AS loop_edges
+"""
+
+
 def check_radiality(fork: Graph) -> list[tuple[str, str]]:
-    # Energized buses are reachable from the source by construction, so they form one
-    # component; it is a tree exactly when it has one conducting edge fewer than buses.
-    buses = fork.ro_query("MATCH (b:Bus {energized: true}) RETURN count(b)").result_set[0][0]
-    edges = fork.ro_query(
-        """
-        MATCH (a:Bus {energized: true})-[r:SEG|SW]->(b:Bus {energized: true})
-        WHERE type(r) = 'SEG' OR r.status = 'closed'
-        RETURN count(r)
-        """
-    ).result_set[0][0]
-    if edges == buses - 1:
+    """Expects a fork holding only conducting edges (see keep_conducting_edges)."""
+    # The source's spanning tree covers every energized bus; any conducting edge it cannot
+    # use joins two buses that are already connected, so it closes a loop.
+    buses, loops = fork.ro_query(RADIALITY_QUERY).result_set[0]
+    if not loops:
         return []
-    return [("radiality", f"{edges} conducting edges among {buses} energized buses "
-                          f"(a tree has {buses - 1}): the plan closes a loop")]
+    verb = "closes a loop" if len(loops) == 1 else "close loops"
+    return [("radiality", f"{', '.join(sorted(loops))} {verb}: {buses - 1 + len(loops)} "
+                          f"conducting edges among {buses} energized buses (a tree has "
+                          f"{buses - 1})")]
 
 
 LOADING_QUERY = """
@@ -167,6 +186,7 @@ def verify_plan(
     fork = live.copy(fork_name)
     try:
         apply_switch_ops(fork, [(o.switch_id, o.op) for o in ops])
+        keep_conducting_edges(fork)
         result.violations = check_isolation(fork) + check_connectivity(fork, result.claims)
         radiality = check_radiality(fork)
         result.violations += radiality

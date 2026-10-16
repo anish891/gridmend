@@ -117,8 +117,8 @@ export default function GraphPage() {
         <h2>The graph is the agent&apos;s working memory</h2>
         <p className="muted">
           Each step of fault location, isolation and restoration is a Cypher query over the feeder twin in
-          FalkorDB. Everything below runs live and read-only against <code>{graph || "grid_live"}</code>, so
-          it shows the graph exactly as the agent sees it now. Fault a line on the Feeder tab and come back to
+          FalkorDB. Everything below runs live against <code>{graph || "grid_live"}</code>, read-only or on a
+          throwaway copy of it, so it shows the graph exactly as the agent sees it now. Fault a line on the Feeder tab and come back to
           see the incident queries fill in.
         </p>
       </section>

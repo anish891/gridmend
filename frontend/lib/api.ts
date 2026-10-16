@@ -87,6 +87,7 @@ export type Explanation = {
     paths: Record<string, string[]>;
   } | null;
   rejected: { id: string; ops: string[]; violations: string[] }[];
+  transfer: { demand_kva: number; deliverable_kva: number; shortfall_kva: number; bottlenecks: string[] };
   critical: CriticalLoad[];
   dark_zones: number[];
   load_served_kw: number;

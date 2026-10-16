@@ -51,6 +51,11 @@ def restoration_candidates() -> dict:
     return tools().call("restoration_candidates", {})
 
 
+@server.tool(description=DESCRIPTIONS["transfer_capacity"])
+def transfer_capacity() -> dict:
+    return tools().call("transfer_capacity", {})
+
+
 @server.tool(description=DESCRIPTIONS["verify_plan"])
 def verify_plan(rank: int | None = None, close: list[str] | None = None,
                 open: list[str] | None = None) -> dict:

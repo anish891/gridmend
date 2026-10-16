@@ -1,6 +1,7 @@
 from falkordb import Graph
 
 from gridmend.flisr.candidates import screen
+from gridmend.flisr.transfer import transfer_limit
 from gridmend.grid.energize import grid_status
 
 
@@ -140,6 +141,7 @@ def explain_incident(g: Graph, incident_id: str) -> dict:
         "isolation": plan_steps(g, f"{incident_id}-iso"),
         "plan": plan,
         "rejected": rejected_plans(g, incident_id),
+        "transfer": transfer_limit(g),
         "critical": critical,
         "dark_zones": status["dark_zones"],
         "load_served_kw": round(status["served_kw"]),

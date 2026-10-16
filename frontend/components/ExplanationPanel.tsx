@@ -34,6 +34,13 @@ export default function ExplanationPanel({ e }: { e: Explanation }) {
           ) : (
             <p>No restoration plan passed verification, so nothing beyond isolation was executed.</p>
           )}
+          {e.transfer.shortfall_kva > 0 && (
+            <p>
+              Max flow over the healthy network: at most <b>{e.transfer.deliverable_kva}</b> of{" "}
+              {e.transfer.demand_kva} kVA can be carried by any switching, limited by{" "}
+              {e.transfer.bottlenecks.join(", ")}.
+            </p>
+          )}
           <p className="muted">
             Still dark: {e.dark_zones.map((z) => `Z${z}`).join(", ") || "none"} ({e.load_unserved_kw} kW unserved).
           </p>

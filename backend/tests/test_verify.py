@@ -29,6 +29,7 @@ def kinds(result):
 def test_closing_both_ties_into_z19_closes_a_loop(z3_isolated):
     result = verify(z3_isolated, "t1", closes=["8-21", "12-22"])
     assert kinds(result) == ["radiality"]
+    assert result.violations[0][1].startswith("12-22 closes a loop")
 
 
 def test_closing_8_21_alone_overloads_lateral_2_19(z3_isolated):

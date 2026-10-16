@@ -238,6 +238,10 @@ def print_explanation(e: dict) -> None:
             print(f"  Z{zone} fed via {' -> '.join(path)}")
     else:
         print("no restoration plan executed")
+    t = e["transfer"]
+    if t["shortfall_kva"]:
+        print(f"transfer limit (max flow): {t['deliverable_kva']} of {t['demand_kva']} kVA of "
+              f"healthy load can be carried at most; limited by {', '.join(t['bottlenecks'])}")
     print("critical loads:")
     for c in e["critical"]:
         state = "restored" if c["energized"] else "dark"
@@ -293,6 +297,8 @@ def summarize_step(name: str, result: dict) -> str:
         return ", ".join(result["executed"])
     if name == "restoration_candidates":
         return f"{len(result['candidates'])} candidates"
+    if name == "transfer_capacity":
+        return f"{result['deliverable_kva']} of {result['demand_kva']} kVA deliverable"
     if name == "verify_plan":
         verdict = "PASS" if result["passed"] else "REJECTED " + "; ".join(
             v.split(":")[0] for v in result["violations"])

@@ -7,6 +7,7 @@ from gridmend.flisr.execute import ExecuteError, execute_plan, verified_plans
 from gridmend.flisr.explain import explain_incident
 from gridmend.flisr.isolate import IsolateError, isolate
 from gridmend.flisr.locate import LocateError, locate_fault
+from gridmend.flisr.transfer import transfer_limit
 from gridmend.flisr.trace import SwitchOp, open_incident
 from gridmend.flisr.verify import next_plan_id, verify_plan
 from gridmend.grid.dependency import line_dependencies
@@ -42,6 +43,9 @@ SCHEMAS = [
                              "Returns the switch operations performed."),
     schema("restoration_candidates", "Ranked candidate restoration plans built from graph searches "
                                      "between dead and live zones. Not yet verified."),
+    schema("transfer_capacity", "Max-flow bound on the healthy load (kVA) the feeder could carry "
+                                "if every switch outside the faulted zone were free to move, "
+                                "and the lines that limit it. Explains what must stay dark."),
     schema(
         "verify_plan",
         "Verify one plan on a forked copy of the grid: isolation, connectivity, radiality, "
@@ -121,6 +125,9 @@ class GridTools:
              "score": round(c.score)}
             for rank, c in enumerate(self.candidates, 1)
         ]}
+
+    def transfer_capacity(self) -> dict:
+        return transfer_limit(self.g)
 
     def verify_plan(self, rank: int | None = None, close: list[str] | None = None,
                     open: list[str] | None = None) -> dict:
