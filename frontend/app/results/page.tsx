@@ -35,8 +35,8 @@ export default function ResultsPage() {
       <header className="page-intro">
         <h1>How GridMend compares</h1>
         <p className="muted">
-          Each of the {faults.length || 23} line segments on the feeder was faulted in turn, and five
-          methods tried to restore power. Unsafe switching counts as restoring nothing, because protection
+          Each of the {faults.length || 23} line segments on the feeder was faulted in turn, and{" "}
+          {methods.length || "several"} methods tried to restore power. Unsafe switching counts as restoring nothing, because protection
           would trip it.
         </p>
       </header>
