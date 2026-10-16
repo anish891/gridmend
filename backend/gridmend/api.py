@@ -19,6 +19,9 @@ from gridmend.flisr.execute import ExecuteError, execute_plan, verified_plans
 from gridmend.flisr.explain import explain_incident
 from gridmend.flisr.isolate import IsolateError, isolate
 from gridmend.flisr.locate import LocateError, locate_fault
+from gridmend.flisr.policy import (
+    ModelError, NotHealthyError, PolicyError, clear_conditions, current_context, set_conditions,
+)
 from gridmend.flisr.trace import incident_trace, open_incident, plan_details
 from gridmend.grid.case33 import load_voltages
 from gridmend.grid.dependency import line_dependencies
@@ -64,6 +67,10 @@ class ExecuteRequest(BaseModel):
     plan_id: str
 
 
+class ContextRequest(BaseModel):
+    conditions: str
+
+
 def live():
     return db.connect().select_graph(GRAPH_NAME)
 
@@ -81,7 +88,7 @@ def state() -> dict:
     buses = g.ro_query(
         """
         MATCH (b:Bus)
-        RETURN b.id, b.zone, b.energized, b.critical, b.facility, b.p_kw, b.is_source
+        RETURN b.id, b.zone, b.energized, b.critical, b.facility, b.weight, b.p_kw, b.is_source
         ORDER BY b.id
         """
     ).result_set
@@ -101,8 +108,8 @@ def state() -> dict:
     return {
         "buses": [
             {"id": b, "zone": zone, "energized": on, "critical": critical,
-             "facility": facility or None, "p_kw": p_kw, "is_source": source}
-            for b, zone, on, critical, facility, p_kw, source in buses
+             "facility": facility or None, "weight": weight, "p_kw": p_kw, "is_source": source}
+            for b, zone, on, critical, facility, weight, p_kw, source in buses
         ],
         "lines": [
             {"id": lid, "from": a, "to": b, "type": "switch" if t == "SW" else "segment",
@@ -329,6 +336,41 @@ def results() -> dict:
     if rows is None:
         raise HTTPException(404, "no evaluation results yet; run `gridmend eval`")
     return {"summary": summarize(rows), "rows": [asdict(r) for r in rows]}
+
+
+@app.get("/context")
+def context() -> dict:
+    return current_context(live())
+
+
+@app.post("/context")
+def set_context(request: ContextRequest) -> dict:
+    # The LLM reads the policy and the operator's report; deterministic code checks every
+    # priority it proposes before anything is written.
+    if not load_settings().llm_configured:
+        raise HTTPException(503, "no language model is configured")
+    # Shares the agent's lock so only one model call runs at a time.
+    if not _agent_lock.acquire(blocking=False):
+        raise HTTPException(429, "the model is busy with another request; try again shortly")
+    try:
+        client, model = agent_client()
+        return set_conditions(live(), client, model, request.conditions)
+    except NotHealthyError as exc:
+        raise HTTPException(409, str(exc))
+    except ModelError as exc:
+        raise HTTPException(503, str(exc))
+    except PolicyError as exc:
+        raise HTTPException(422, str(exc))
+    finally:
+        _agent_lock.release()
+
+
+@app.delete("/context")
+def delete_context() -> dict:
+    try:
+        return clear_conditions(live())
+    except NotHealthyError as exc:
+        raise HTTPException(409, str(exc))
 
 
 @app.post("/reset")

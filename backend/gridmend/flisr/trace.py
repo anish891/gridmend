@@ -37,6 +37,14 @@ def record_incident(g: Graph, zone: int) -> str:
         """,
         {"id": incident_id, "zone": zone, "ts": datetime.now(timezone.utc).isoformat()},
     )
+    # The incident is handled under the operating conditions in force when it was found.
+    g.query(
+        """
+        MATCH (i:Incident {id: $id}), (c:Context {current: true})
+        CREATE (i)-[:UNDER]->(c)
+        """,
+        {"id": incident_id},
+    )
     return incident_id
 
 

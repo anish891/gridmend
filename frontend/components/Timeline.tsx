@@ -5,6 +5,7 @@ type Props = {
   fault: string | null;
   location: Location | null;
   trace: Trace | null;
+  conditions: string | null;
 };
 
 const KIND_LABEL: Record<string, string> = { isolation: "Isolation", restoration: "Restoration plan" };
@@ -15,10 +16,16 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "failed safety checks",
 };
 
-export default function Timeline({ fault, location, trace }: Props) {
+export default function Timeline({ fault, location, trace, conditions }: Props) {
   return (
     <Card as="aside" className="timeline" title="Decision trace" hint={trace?.incident.id}>
       <ol>
+        {conditions && (
+          <li className="event">
+            <b>Conditions in force</b>
+            <div className="muted">{conditions}</div>
+          </li>
+        )}
         {fault && (
           <li className="event fault">
             <b>Fault on {fault}</b>

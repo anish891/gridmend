@@ -7,6 +7,7 @@ from gridmend.flisr.execute import ExecuteError, execute_plan, verified_plans
 from gridmend.flisr.explain import explain_incident
 from gridmend.flisr.isolate import IsolateError, isolate
 from gridmend.flisr.locate import LocateError, locate_fault
+from gridmend.flisr.policy import current_context, load_policy
 from gridmend.flisr.transfer import transfer_limit
 from gridmend.flisr.trace import SwitchOp, open_incident
 from gridmend.flisr.verify import next_plan_id, verify_plan
@@ -33,6 +34,9 @@ def schema(name: str, description: str, properties: dict | None = None,
 SWITCH_LIST = {"type": "array", "items": {"type": "string"}}
 
 SCHEMAS = [
+    schema("operating_context", "Today's operating conditions as reported by the operator, the "
+                                "priority weight of every facility for this incident with the "
+                                "policy rule behind it, and the full restoration priority policy."),
     schema("grid_status", "Energized, dark and faulted zones, switch states and load served."),
     schema("locate_fault", "Find the faulted zone from the fault indicator chain."),
     schema("line_dependencies", "For each energized line, the buses, load (kW) and critical "
@@ -91,6 +95,15 @@ class GridTools:
         if incident is None:
             raise ValueError("no active incident")
         return incident["id"]
+
+    def operating_context(self) -> dict:
+        context = current_context(self.g)
+        return {
+            "conditions": context["conditions"] or "normal day: no special conditions reported",
+            "priorities": [{k: p[k] for k in ("facility", "zone", "weight", "rule")}
+                           for p in context["priorities"]],
+            "policy": load_policy(),
+        }
 
     def grid_status(self) -> dict:
         s = grid_status(self.g)
@@ -179,7 +192,7 @@ class GridTools:
             {"incident": incident_id, "id": plan_id, "reason": reason},
         )
         return {"recommended": plan_id, "critical_loads_restored": plan["critical"],
-                "restored_kw": round(plan["restored_kw"])}
+                "priority_restored": plan["priority"], "restored_kw": round(plan["restored_kw"])}
 
     def execute_plan(self, plan_id: str) -> dict:
         plan = next((p for p in verified_plans(self.g, self.incident_id()) if p["id"] == plan_id),

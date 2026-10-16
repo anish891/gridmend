@@ -22,6 +22,11 @@ critical_loads:
   24: water pumping
   30: telecom
 
+# Named sites that are ordinary load on a normal day. The restoration policy
+# (data/policy.md) can raise them for an incident, e.g. a cooling centre in a heatwave.
+facilities:
+  11: cooling centre
+
 weights:
   critical: 10
   default: 1

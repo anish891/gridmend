@@ -1,6 +1,7 @@
 from falkordb import Graph
 
 from gridmend.flisr.candidates import screen
+from gridmend.flisr.policy import incident_context
 from gridmend.flisr.transfer import transfer_limit
 from gridmend.grid.energize import grid_status
 
@@ -45,6 +46,23 @@ def rejected_plans(g: Graph, incident_id: str) -> list[dict]:
 def why_dark(g: Graph, incident_id: str, zone: int, faulted: bool) -> str:
     if faulted:
         return "inside the faulted zone; it stays isolated until the line is repaired"
+
+    # A safe plan existed but another one served the priorities in force better.
+    passed_over = g.ro_query(
+        """
+        MATCH (i:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {status: 'verified'})-[:RESTORES]->
+              (:Zone {id: $zone})
+        OPTIONAL MATCH (i)-[:HAS_PLAN]->(chosen:Plan {kind: 'restoration', status: 'executed'})
+        RETURN p.id, chosen.id ORDER BY p.id LIMIT 1
+        """,
+        {"id": incident_id, "zone": zone},
+    ).result_set
+    if passed_over:
+        plan_id, chosen = passed_over[0]
+        if chosen:
+            return (f"{plan_id} would restore it safely, but {chosen} restores critical sites with "
+                    f"a higher total priority under the conditions in force")
+        return f"{plan_id} would restore it safely; awaiting the operator's choice"
 
     blocked = g.ro_query(
         """
@@ -143,6 +161,7 @@ def explain_incident(g: Graph, incident_id: str) -> dict:
         "rejected": rejected_plans(g, incident_id),
         "transfer": transfer_limit(g),
         "critical": critical,
+        "context": incident_context(g, incident_id),
         "dark_zones": status["dark_zones"],
         "load_served_kw": round(status["served_kw"]),
         "load_unserved_kw": round(status["total_kw"] - status["served_kw"]),

@@ -46,7 +46,22 @@ export default function ExplanationPanel({ e }: { e: Explanation }) {
         </div>
 
         <div>
-          <h3>Critical loads</h3>
+          {e.context && (
+            <>
+              <h3>Conditions and priorities</h3>
+              <p className="muted">{e.context.conditions}</p>
+              <ul className="priority-list">
+                {e.context.priorities.map((p) => (
+                  <li key={p.facility}>
+                    <b>{p.facility}</b> {p.weight}
+                    {p.weight !== p.standing && <span className="muted"> (normally {p.standing})</span>}
+                    <div className="small muted">{p.rule}</div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <h3>Critical sites</h3>
           <ul className="critical-list">
             {e.critical.map((c) => (
               <li key={c.bus} className={c.energized ? "on" : "off"}>

@@ -29,13 +29,7 @@ def build_zones(g: Graph) -> int:
         """,
         {"zones": zones},
     )
-    g.query(
-        """
-        MATCH (b:Bus)-[:IN_ZONE]->(z:Zone)
-        WITH z, sum(b.p_kw) AS p_kw, sum(b.p_kw * b.weight) AS weighted_kw
-        SET z.p_kw = p_kw, z.weighted_kw = weighted_kw
-        """
-    )
+    refresh_zone_weights(g)
     # Line ids put the upstream bus first on every normally closed line, so for
     # sectionalizers the edge points from the upstream zone to the downstream one.
     g.query(
@@ -46,6 +40,16 @@ def build_zones(g: Graph) -> int:
         """
     )
     return len(zones)
+
+
+def refresh_zone_weights(g: Graph) -> None:
+    g.query(
+        """
+        MATCH (b:Bus)-[:IN_ZONE]->(z:Zone)
+        WITH z, sum(b.p_kw) AS p_kw, sum(b.p_kw * b.weight) AS weighted_kw
+        SET z.p_kw = p_kw, z.weighted_kw = weighted_kw
+        """
+    )
 
 
 def zone_table(g: Graph) -> list[dict]:

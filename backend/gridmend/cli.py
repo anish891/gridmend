@@ -382,6 +382,32 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_context(args: argparse.Namespace) -> int:
+    from gridmend.flisr.policy import PolicyError, clear_conditions, current_context, set_conditions
+    from gridmend.grid.load import LIVE_GRAPH
+
+    g = db.connect().select_graph(LIVE_GRAPH)
+    try:
+        if args.clear:
+            context = clear_conditions(g)
+        elif args.conditions:
+            from gridmend.agent.llm import make_client
+
+            client, model = make_client()
+            context = set_conditions(g, client, model, args.conditions)
+        else:
+            context = current_context(g)
+    except PolicyError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
+    print(f"conditions: {context['conditions'] or 'normal day'}")
+    for p in context["priorities"]:
+        change = "" if p["weight"] == p["standing"] else f" (standing {p['standing']})"
+        print(f"  {p['facility']} (bus {p['bus']}, Z{p['zone']}): {p['weight']}{change}  {p['rule']}")
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     from gridmend.sim import reset
 
@@ -414,6 +440,12 @@ def build_parser() -> argparse.ArgumentParser:
     fault.set_defaults(func=cmd_fault)
 
     sub.add_parser("reset", help="restore grid_live from grid_base").set_defaults(func=cmd_reset)
+
+    context = sub.add_parser("context", help="set today's conditions; the LLM applies the "
+                                              "restoration policy to them")
+    context.add_argument("conditions", nargs="?", help="the operator's report, in plain words")
+    context.add_argument("--clear", action="store_true", help="back to standing priorities")
+    context.set_defaults(func=cmd_context)
     sub.add_parser("locate", help="locate the faulted zone from indicators").set_defaults(
         func=cmd_locate
     )

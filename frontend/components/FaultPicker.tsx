@@ -27,9 +27,11 @@ type Props = {
   agentModel: string | null;
   mode: Mode;
   onMode: (mode: Mode) => void;
+  // Today's conditions, shown before the faults because they set the priorities.
+  conditions?: React.ReactNode;
 };
 
-export default function FaultPicker({ disabled, onFault, agentModel, mode, onMode }: Props) {
+export default function FaultPicker({ disabled, onFault, agentModel, mode, onMode, conditions }: Props) {
   return (
     <Card className="hero">
       <h1>Simulate a fault and watch the feeder heal itself</h1>
@@ -37,6 +39,8 @@ export default function FaultPicker({ disabled, onFault, agentModel, mode, onMod
         GridMend finds the damaged section, cuts it out and re-routes power around it. Every plan is
         safety-checked on a copy of the grid before a single switch moves.
       </p>
+      {conditions}
+      {conditions && <h2 className="conditions-title">Pick a fault</h2>}
       <div className="demo-faults">
         {DEMO_FAULTS.map((f) => (
           <button key={f.line} type="button" className="demo-fault" disabled={disabled} onClick={() => onFault(f.line)}>

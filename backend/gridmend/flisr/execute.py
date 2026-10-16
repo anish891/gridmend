@@ -12,8 +12,9 @@ class ExecuteError(Exception):
 
 
 def verified_plans(g: Graph, incident_id: str) -> list[dict]:
-    """Verified plans with the critical facilities each one restores, best first:
-    critical loads first, then most load restored, then fewest switch operations."""
+    """Verified plans with the critical facilities each one restores, best first: highest
+    total priority of critical sites restored (policy 1.3), then most load restored, then
+    fewest switch operations. With equal standing priorities this is the count of critical sites."""
     rows = g.ro_query(
         """
         MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {kind: 'restoration', status: 'verified'})
@@ -23,6 +24,7 @@ def verified_plans(g: Graph, incident_id: str) -> list[dict]:
     ).result_set
     plans = []
     for plan_id, kw, weighted, ops, min_v, max_loading in rows:
+        sites = critical_sites(g, plan_id)
         plans.append({
             "id": plan_id,
             "restored_kw": kw,
@@ -30,20 +32,21 @@ def verified_plans(g: Graph, incident_id: str) -> list[dict]:
             "switch_ops": ops,
             "min_v_pu": min_v,
             "max_loading_pct": max_loading,
-            "critical": critical_restored(g, plan_id),
+            "critical": [facility for facility, _ in sites],
+            "priority": sum(weight for _, weight in sites),
         })
-    return sorted(plans, key=lambda p: (-len(p["critical"]), -p["restored_kw"], p["switch_ops"]))
+    return sorted(plans, key=lambda p: (-p["priority"], -p["restored_kw"], p["switch_ops"]))
 
 
-def critical_restored(g: Graph, plan_id: str) -> list[str]:
+def critical_sites(g: Graph, plan_id: str) -> list[tuple[str, int]]:
     rows = g.ro_query(
         """
         MATCH (p:Plan {id: $id})-[:RESTORES]->(z:Zone)<-[:IN_ZONE]-(b:Bus {critical: true})
-        RETURN b.facility ORDER BY b.id
+        RETURN b.facility, b.weight ORDER BY b.id
         """,
         {"id": plan_id},
     ).result_set
-    return [row[0] for row in rows]
+    return [(facility, weight) for facility, weight in rows]
 
 
 def execute_plan(g: Graph, plan_id: str) -> list[tuple[str, str]]:

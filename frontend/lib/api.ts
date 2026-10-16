@@ -6,8 +6,17 @@ export type Bus = {
   energized: boolean;
   critical: boolean;
   facility: string | null;
+  weight: number;
   p_kw: number;
   is_source: boolean;
+};
+
+export type Priority = { facility: string; weight: number; standing: number; rule: string };
+
+export type OperatingContext = {
+  conditions: string | null;
+  model: string | null;
+  priorities: (Priority & { bus: number; zone: number })[];
 };
 
 export type Line = {
@@ -89,6 +98,8 @@ export type Explanation = {
   rejected: { id: string; ops: string[]; violations: string[] }[];
   transfer: { demand_kva: number; deliverable_kva: number; shortfall_kva: number; bottlenecks: string[] };
   critical: CriticalLoad[];
+  // The conditions and priorities the incident was handled under (null on a normal day).
+  context: { conditions: string; priorities: Priority[] } | null;
   dark_zones: number[];
   load_served_kw: number;
   load_unserved_kw: number;
@@ -165,7 +176,7 @@ export async function runAgent(onEvent: (event: AgentEvent) => void): Promise<vo
   }
 }
 
-async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+async function call<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     method,
     cache: "no-store",
@@ -192,4 +203,7 @@ export const api = {
   risk: () => call<{ lines: RiskLine[] }>("GET", "/risk"),
   agentInfo: () => call<{ available: boolean; model: string | null }>("GET", "/agent"),
   reset: () => call<{ ok: boolean }>("POST", "/reset"),
+  context: () => call<OperatingContext>("GET", "/context"),
+  setConditions: (conditions: string) => call<OperatingContext>("POST", "/context", { conditions }),
+  clearConditions: () => call<OperatingContext>("DELETE", "/context"),
 };

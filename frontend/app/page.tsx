@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import AgentPanel from "@/components/AgentPanel";
 import CandidateList from "@/components/CandidateList";
+import Conditions from "@/components/Conditions";
 import ExplanationPanel from "@/components/ExplanationPanel";
 import FaultPicker, { type Mode } from "@/components/FaultPicker";
 import FeederDiagram, { RISK_STEPS, type Pulse, type Risk } from "@/components/FeederDiagram";
@@ -18,8 +19,8 @@ import EmptyState from "@/components/ui/EmptyState";
 import Segmented from "@/components/ui/Segmented";
 import Term from "@/components/ui/Term";
 import {
-  api, runAgent, type AgentEvent, type Explanation, type GridState, type Location, type PlanResult,
-  type SwitchOp, type Trace,
+  api, runAgent, type AgentEvent, type Explanation, type GridState, type Location, type OperatingContext,
+  type PlanResult, type SwitchOp, type Trace,
 } from "@/lib/api";
 import { problemsFor, withSwitch } from "@/lib/overlay";
 
@@ -49,6 +50,9 @@ export default function Home() {
   const [agentModel, setAgentModel] = useState<string | null>(null);
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
   const [agentRunning, setAgentRunning] = useState(false);
+  const [context, setContext] = useState<OperatingContext | null>(null);
+  const [contextBusy, setContextBusy] = useState(false);
+  const [contextError, setContextError] = useState<string | null>(null);
   const [risk, setRisk] = useState<Risk | null>(null);
   const [showRisk, setShowRisk] = useState(false);
 
@@ -210,6 +214,20 @@ export default function Home() {
     }
   }, [refresh, working, replay]);
 
+  // New conditions change bus weights, so the diagram and status bar are read back afterwards.
+  const applyConditions = useCallback(async (conditions: string | null) => {
+    setContextBusy(true);
+    setContextError(null);
+    try {
+      setContext(conditions ? await api.setConditions(conditions) : await api.clearConditions());
+      await refresh();
+    } catch (e) {
+      setContextError((e as Error).message);
+    } finally {
+      setContextBusy(false);
+    }
+  }, [refresh]);
+
   const resetGrid = useCallback(async () => {
     setError(null);
     working(STEP.fault, "Restoring the healthy feeder");
@@ -224,12 +242,18 @@ export default function Home() {
       setExplanation(null);
       setAgentEvents([]);
       await refresh();
+      // A reset copies the pristine grid, which carries no conditions.
+      setContext(await api.context());
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(null);
     }
   }, [refresh, working]);
+
+  useEffect(() => {
+    api.context().then(setContext).catch(() => setContext(null));
+  }, []);
 
   useEffect(() => {
     api.agentInfo()
@@ -291,11 +315,20 @@ export default function Home() {
       {error && <p className="error" role="alert">{error}</p>}
       {picking ? (
         <FaultPicker
-          disabled={busy !== null}
+          disabled={busy !== null || contextBusy}
           onFault={(line) => run("fault", line)}
           agentModel={agentModel}
           mode={mode}
           onMode={setMode}
+          conditions={agentModel && (
+            <Conditions
+              context={context}
+              busy={contextBusy}
+              error={contextError}
+              disabled={busy !== null}
+              onApply={applyConditions}
+            />
+          )}
         />
       ) : (
         <Stepper
@@ -330,7 +363,7 @@ export default function Home() {
               pulse={pulse}
               problems={problems}
               risk={showRisk ? risk : null}
-              onSegmentClick={healthy && !busy ? (line) => run("fault", line) : undefined}
+              onSegmentClick={healthy && !busy && !contextBusy ? (line) => run("fault", line) : undefined}
             />
           )}
           {showRisk && (
@@ -383,7 +416,7 @@ export default function Home() {
         {healthy ? (
           <Intro />
         ) : (
-          <Timeline fault={fault} location={location} trace={trace} />
+          <Timeline fault={fault} location={location} trace={trace} conditions={context?.conditions ?? null} />
         )}
       </div>
 
