@@ -55,3 +55,14 @@ def test_voltage_limited_fault_has_no_passing_plan(falkordb, graph):
 def test_nothing_to_restore_when_only_the_faulted_lateral_is_dark(graph):
     isolated(graph, "23-24")
     assert generate_candidates(graph) == []
+
+
+def test_saved_screens_reload_to_the_same_candidates(graph, tmp_path):
+    from gridmend.flisr import candidates
+
+    isolated(graph, "4-5")
+    first = generate_candidates(graph)
+    candidates.save_screens(tmp_path / "screens.json")
+    candidates._SCREENS.clear()
+    assert candidates.load_screens(tmp_path / "screens.json") > 0
+    assert generate_candidates(graph) == first

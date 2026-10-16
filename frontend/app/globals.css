@@ -378,6 +378,10 @@ button.secondary {
   box-shadow: 0 4px 12px rgb(0 0 0 / 18%);
 }
 
+.tooltip.below {
+  transform: translate(-50%, 18px);
+}
+
 .legend {
   display: flex;
   flex-wrap: wrap;
@@ -934,3 +938,55 @@ td.bad { color: var(--faulted); }
 .agent-answer table { margin: 4px 0 10px; }
 .agent-answer td,
 .agent-answer th { text-align: left; }
+
+/* Diagram view switch and risk map */
+
+.view-switch {
+  margin-left: auto;
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.view-switch button {
+  border: 0;
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+.view-switch button.on {
+  background: var(--text);
+  color: #fff;
+  filter: none;
+}
+
+.risk-legend {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.risk-scale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12px;
+}
+
+.risk-scale span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.risk-scale i {
+  width: 22px;
+  height: 6px;
+  border-radius: 3px;
+}

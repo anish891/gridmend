@@ -6,9 +6,8 @@ from dataclasses import dataclass
 from itertools import product
 
 import networkx as nx
-import pandapower as pp
 
-from gridmend.grid.case33 import bus_voltages, load_network
+from gridmend.grid.case33 import PowerFlowError, bus_voltages, load_network
 from gridmend.grid.load import bus_rows, line_rows, load_assumptions
 
 
@@ -106,7 +105,7 @@ class Feeder:
         conducting = {data["id"] for _, _, data in tree.edges(data=True)}
         try:
             voltages = bus_voltages(conducting)
-        except pp.LoadflowNotConverged:
+        except PowerFlowError:
             return ["voltage"]
         return ["voltage"] if min(voltages.values()) < self.voltage_min else []
 

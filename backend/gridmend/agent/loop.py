@@ -1,9 +1,11 @@
 import json
 from collections.abc import Callable
-
-from openai import OpenAI
+from typing import TYPE_CHECKING
 
 from gridmend.agent.tools import GridTools
+
+if TYPE_CHECKING:
+    from openai import OpenAI
 
 SYSTEM_PROMPT = """You are GridMend, an assistant to a distribution grid operator. The feeder's
 breaker has tripped. Restore service safely using only your tools; the grid twin lives in a
@@ -47,7 +49,7 @@ def tool_result(content: dict) -> str:
 
 
 def run_agent(
-    client: OpenAI,
+    client: "OpenAI",
     model: str,
     tools: GridTools,
     on_step: Callable[[str, dict, dict], None] = lambda name, args, result: None,

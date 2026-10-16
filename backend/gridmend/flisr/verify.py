@@ -1,10 +1,9 @@
 from dataclasses import dataclass, field
 
-import pandapower as pp
 from falkordb import FalkorDB, Graph
 
 from gridmend.flisr.trace import SwitchOp, record_plan
-from gridmend.grid.case33 import bus_voltages
+from gridmend.grid.case33 import PowerFlowError, bus_voltages
 from gridmend.grid.energize import apply_switch_ops
 from gridmend.grid.load import load_assumptions
 
@@ -124,7 +123,7 @@ def check_voltage(fork: Graph) -> tuple[list[tuple[str, str]], float | None]:
     }
     try:
         voltages = bus_voltages(conducting)
-    except pp.LoadflowNotConverged:
+    except PowerFlowError:
         return [("voltage", "power flow did not converge")], None
 
     limit = load_assumptions()["voltage_min_pu"]

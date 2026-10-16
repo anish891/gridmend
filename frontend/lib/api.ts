@@ -21,7 +21,11 @@ export type Line = {
   fi: "set" | "clear" | "none" | null;
   faulted: boolean;
   cap_kva: number;
+  // What depends on this line in the current switching (null when it carries nothing).
+  carries: { buses: number; kw: number; critical: string[] } | null;
 };
+
+export type RiskLine = { line: string; unserved_kw: number; restored_kw: number; critical_dark: string[] };
 
 export type Zone = { id: number; energized: boolean; faulted: boolean; p_kw: number };
 
@@ -184,6 +188,7 @@ export const api = {
   results: () => call<Results>("GET", "/results"),
   queries: () => call<{ graph: string; steps: QueryStep[] }>("GET", "/queries"),
   plans: () => call<PlanResult>("GET", "/plans"),
+  risk: () => call<{ lines: RiskLine[] }>("GET", "/risk"),
   agentInfo: () => call<{ available: boolean; model: string | null }>("GET", "/agent"),
   reset: () => call<{ ok: boolean }>("POST", "/reset"),
 };

@@ -27,7 +27,9 @@ RUN uv venv -p 3.12 /opt/venv && uv pip install -p /opt/venv --no-cache -e ./bac
 COPY deploy/ deploy/
 # The evaluation needs a running FalkorDB and takes seconds with build-time CPU, so its
 # results ship in the image instead of being recomputed on a small host.
+# The loaded feeder is saved too, so the container starts without rebuilding the graph.
 RUN deploy/falkordb.sh && gridmend load && gridmend eval > /dev/null \
+    && redis-cli save && mkdir -p /app/snapshot && cp /tmp/dump.rdb /app/snapshot/ \
     && redis-cli shutdown nosave
 
 FROM ${FALKORDB_IMAGE}
@@ -38,6 +40,7 @@ COPY backend/ backend/
 RUN uv venv -p 3.12 /opt/venv && uv pip install -p /opt/venv --no-cache -e ./backend
 COPY deploy/ deploy/
 COPY --from=results /app/backend/eval/out backend/eval/out
+COPY --from=results /app/snapshot /app/snapshot
 COPY --from=ui /ui/out /app/ui
 
 EXPOSE 7860

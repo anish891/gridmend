@@ -1,8 +1,13 @@
 #!/bin/sh
-# FalkorDB on localhost only, in memory, with the image's default module arguments.
-# Nothing is ever saved to disk, so Redis's ARM64 copy-on-write check (which fails under
+# FalkorDB on localhost only, in memory, with the image's default module arguments. If the image
+# carries a snapshot of the loaded feeder, it starts from that instead of an empty database.
+# Nothing is ever saved back to disk, so Redis's ARM64 copy-on-write check (which fails under
 # the emulated arm64 kernel used for multi-arch builds) guards nothing here.
 set -e
+
+if [ -f /app/snapshot/dump.rdb ]; then
+    cp /app/snapshot/dump.rdb /tmp/dump.rdb
+fi
 
 redis-server --bind 127.0.0.1 --port 6379 --daemonize yes \
     --dir /tmp --save "" --appendonly no \

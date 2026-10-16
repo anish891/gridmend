@@ -2,18 +2,22 @@ import csv
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from falkordb import FalkorDB, Graph
 
-from eval.optimal import Feeder, optimal_restoration
-from gridmend.flisr.candidates import greedy_candidate, read_situation
+from gridmend.flisr.candidates import cached_screen, greedy_candidate, read_situation, save_screens
 from gridmend.flisr.execute import restore
 from gridmend.flisr.isolate import isolate
 from gridmend.flisr.locate import locate_fault
 from gridmend.flisr.trace import SwitchOp
 from gridmend.flisr.verify import verify_plan
+from gridmend.grid.case33 import save_voltages
 from gridmend.grid.load import BASE_GRAPH
 from gridmend.sim import apply_fault
+
+if TYPE_CHECKING:
+    from eval.optimal import Feeder
 
 EVAL_GRAPH = "grid_eval"
 OUT_DIR = Path(__file__).resolve().parent / "out"
@@ -29,6 +33,9 @@ class Row:
     violations: int
     plan_ms: float
     optimal_kw: float = 0.0
+    # After the method's switching: load still dark and critical facilities still dark.
+    unserved_kw: float = 0.0
+    critical_dark: str = ""
 
 
 def isolated_graph(db: FalkorDB, line: str) -> tuple[Graph, str]:
@@ -69,7 +76,7 @@ def score_unverified(db: FalkorDB, g: Graph, incident_id: str, line: str, method
 def run_greedy(db: FalkorDB, line: str) -> Row:
     g, incident_id = isolated_graph(db, line)
     start = time.perf_counter()
-    candidate = greedy_candidate(g, read_situation(g))
+    candidate = greedy_candidate(cached_screen(g), read_situation(g))
     plan_ms = 1000 * (time.perf_counter() - start)
     ops = list(candidate.ops) if candidate else []
     return score_unverified(db, g, incident_id, line, "greedy", ops, plan_ms)
@@ -134,13 +141,15 @@ def run_llm_only(db: FalkorDB, line: str, client, model: str) -> Row:
     return row
 
 
-def run_gridmend(db: FalkorDB, feeder: Feeder, line: str) -> Row:
+def run_gridmend(db: FalkorDB, feeder: "Feeder", line: str) -> Row:
     g, incident_id = isolated_graph(db, line)
     start = time.perf_counter()
     _, executed = restore(db, g, incident_id, approve=lambda plan: True)
     plan_ms = 1000 * (time.perf_counter() - start)
+    unserved_kw, critical_dark = left_dark(g)
     if executed is None:
-        return Row(line, "gridmend", 0.0, 0, 0, 0, plan_ms)
+        return Row(line, "gridmend", 0.0, 0, 0, 0, plan_ms,
+                   unserved_kw=unserved_kw, critical_dark=critical_dark)
 
     # Re-check the executed configuration with the independent oracle.
     closed = frozenset(row[0] for row in g.ro_query(
@@ -149,10 +158,24 @@ def run_gridmend(db: FalkorDB, feeder: Feeder, line: str) -> Row:
     faulted = feeder.isolated_state(line)[0]
     oracle = feeder.evaluate(closed, faulted)
     return Row(line, "gridmend", executed["restored_kw"], len(executed["critical"]),
-               executed["switch_ops"], len(oracle.violations), plan_ms)
+               executed["switch_ops"], len(oracle.violations), plan_ms,
+               unserved_kw=unserved_kw, critical_dark=critical_dark)
 
 
-def run_optimal(feeder: Feeder, line: str) -> Row:
+def left_dark(g: Graph) -> tuple[float, str]:
+    """Load and critical facilities still without power, for the risk map."""
+    kw, facilities = g.ro_query(
+        """
+        MATCH (b:Bus {energized: false})
+        RETURN sum(b.p_kw), collect(CASE WHEN b.critical THEN b.facility END)
+        """
+    ).result_set[0]
+    return kw or 0.0, ";".join(facilities)
+
+
+def run_optimal(feeder: "Feeder", line: str) -> Row:
+    from eval.optimal import optimal_restoration
+
     start = time.perf_counter()
     best = optimal_restoration(feeder, line)
     plan_ms = 1000 * (time.perf_counter() - start)
@@ -160,6 +183,9 @@ def run_optimal(feeder: Feeder, line: str) -> Row:
 
 
 def run_all(db: FalkorDB, extra_methods=()) -> list[Row]:
+    # The oracle needs networkx and pandapower; the API only reads results, so import it here.
+    from eval.optimal import Feeder
+
     feeder = Feeder()
     rows = []
     for line in feeder.segments:
@@ -227,6 +253,10 @@ def write_outputs(rows: list[Row], summary: list[dict]) -> Path:
         writer.writeheader()
         writer.writerows(asdict(r) for r in rows)
     (OUT_DIR / "results.md").write_text(markdown(rows, summary))
+    # Every fault's candidate screens and verified power flows were just computed; ship them so a
+    # deployed API starts warm.
+    save_screens(OUT_DIR / "screens.json")
+    save_voltages(OUT_DIR / "voltages.json")
     return OUT_DIR
 
 
@@ -245,6 +275,8 @@ def load_results() -> list[Row] | None:
                 violations=int(r["violations"]),
                 plan_ms=float(r["plan_ms"]),
                 optimal_kw=float(r["optimal_kw"]),
+                unserved_kw=float(r.get("unserved_kw") or 0.0),
+                critical_dark=r.get("critical_dark") or "",
             )
             for r in csv.DictReader(f)
         ]

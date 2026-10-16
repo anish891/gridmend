@@ -31,6 +31,11 @@ def grid_status() -> dict:
     return tools().call("grid_status", {})
 
 
+@server.tool(description=DESCRIPTIONS["line_dependencies"])
+def line_dependencies(top: int | None = None) -> dict:
+    return tools().call("line_dependencies", {"top": top})
+
+
 @server.tool(description=DESCRIPTIONS["locate_fault"])
 def locate_fault() -> dict:
     return tools().call("locate_fault", {})

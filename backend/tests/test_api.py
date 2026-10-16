@@ -194,3 +194,34 @@ def test_agent_runs_are_spaced_out(client, agent, monkeypatch):
     response = client.post("/agent/run")
     assert response.status_code == 429
     assert "cooling down" in response.json()["detail"]
+
+
+def test_deployed_site_loads_the_build_time_caches(tmp_path, monkeypatch):
+    from gridmend import site
+
+    calls = []
+    monkeypatch.setattr(site, "load_caches", lambda: calls.append(True))
+    (tmp_path / "index.html").write_text("ok")
+    with TestClient(site.create_site(tmp_path)) as client:
+        assert client.get("/").text == "ok"
+    assert calls == [True]
+
+
+def test_state_reports_what_each_line_carries(client):
+    lines = {l["id"]: l for l in client.get("/state").json()["lines"]}
+    assert lines["1-2"]["carries"]["kw"] == pytest.approx(3715)
+    assert set(lines["6-7"]["carries"]["critical"]) == {"hospital", "fire station"}
+    assert lines["8-21"]["carries"] is None
+
+
+def test_risk_map_comes_from_the_evaluation(client, tmp_path, monkeypatch):
+    import eval.run as run
+
+    monkeypatch.setattr(run, "OUT_DIR", tmp_path)
+    assert client.get("/risk").status_code == 404
+    rows = [run.Row("4-5", "gridmend", 850.0, 2, 4, 0, 500.0, 850.0, 2405.0, "water pumping;telecom"),
+            run.Row("4-5", "optimal", 850.0, 2, 4, 0, 300.0, 850.0)]
+    run.write_outputs(rows, run.summarize(rows))
+    assert client.get("/risk").json()["lines"] == [
+        {"line": "4-5", "unserved_kw": 2405.0, "restored_kw": 850.0,
+         "critical_dark": ["water pumping", "telecom"]}]

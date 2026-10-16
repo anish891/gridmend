@@ -125,3 +125,26 @@ def test_power_flow_matches_base_case_when_all_normal_lines_conduct(graph):
     voltages = bus_voltages(conducting)
     assert len(voltages) == 33
     assert min(voltages.values()) == pytest.approx(0.9131, abs=1e-3)
+
+
+def test_power_flow_that_does_not_converge_is_a_voltage_violation(graph, monkeypatch):
+    from gridmend.flisr import verify
+    from gridmend.grid.case33 import PowerFlowError
+
+    def diverge(conducting):
+        raise PowerFlowError("power flow did not converge")
+
+    monkeypatch.setattr(verify, "bus_voltages", diverge)
+    assert verify.check_voltage(graph) == ([("voltage", "power flow did not converge")], None)
+
+
+def test_saved_power_flows_reload_without_rerunning(tmp_path, monkeypatch):
+    from gridmend.grid import case33
+
+    conducting = {"1-2", "2-3", "3-4"}
+    volts = case33.bus_voltages(conducting)
+    case33.save_voltages(tmp_path / "voltages.json")
+    case33._VOLTAGES.clear()
+    assert case33.load_voltages(tmp_path / "voltages.json") >= 1
+    monkeypatch.setattr(case33, "load_network", lambda: pytest.fail("power flow ran again"))
+    assert case33.bus_voltages(conducting) == volts

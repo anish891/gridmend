@@ -1,10 +1,16 @@
+# pandapower takes over a minute to import on a small host, so it is imported only when a
+# power flow actually runs.
+from __future__ import annotations
+
 import copy
+import json
 from dataclasses import dataclass
 from functools import cache
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pandapower as pp
-import pandapower.networks as pn
-from pandapower.auxiliary import pandapowerNet
+if TYPE_CHECKING:
+    from pandapower.auxiliary import pandapowerNet
 
 
 def ieee_bus(pp_index: int) -> int:
@@ -19,6 +25,8 @@ def line_id(from_pp: int, to_pp: int) -> str:
 
 @cache
 def _base_network() -> pandapowerNet:
+    import pandapower.networks as pn
+
     return pn.case33bw()
 
 
@@ -28,16 +36,46 @@ def load_network() -> pandapowerNet:
     return copy.deepcopy(_base_network())
 
 
+# A power flow depends only on the fixed case and on which lines conduct, so results are kept
+# per configuration; the evaluation saves them for the deployed image (see eval/run.py).
+_VOLTAGES: dict[frozenset[str], dict[int, float]] = {}
+
+
+class PowerFlowError(Exception):
+    pass
+
+
 def bus_voltages(conducting: set[str]) -> dict[int, float]:
     """Run a power flow with exactly the given line ids in service; pu voltage per fed bus."""
-    net = load_network()
-    net.line["in_service"] = [
-        line_id(f, t) in conducting for f, t in zip(net.line.from_bus, net.line.to_bus)
-    ]
-    pp.runpp(net, numba=False)
-    # Buses cut off from the source come back as NaN.
-    vm = net.res_bus.vm_pu.dropna()
-    return {ieee_bus(i): float(v) for i, v in vm.items()}
+    key = frozenset(conducting)
+    if key not in _VOLTAGES:
+        import pandapower as pp
+
+        net = load_network()
+        net.line["in_service"] = [
+            line_id(f, t) in conducting for f, t in zip(net.line.from_bus, net.line.to_bus)
+        ]
+        try:
+            pp.runpp(net, numba=False)
+        except pp.LoadflowNotConverged as exc:
+            raise PowerFlowError("power flow did not converge") from exc
+        # Buses cut off from the source come back as NaN.
+        vm = net.res_bus.vm_pu.dropna()
+        _VOLTAGES[key] = {ieee_bus(i): float(v) for i, v in vm.items()}
+    return _VOLTAGES[key]
+
+
+def save_voltages(path: Path) -> None:
+    rows = [{"conducting": sorted(key), "vm_pu": volts} for key, volts in _VOLTAGES.items()]
+    path.write_text(json.dumps(rows))
+
+
+def load_voltages(path: Path) -> int:
+    if not path.exists():
+        return 0
+    for row in json.loads(path.read_text()):
+        _VOLTAGES[frozenset(row["conducting"])] = {int(b): v for b, v in row["vm_pu"].items()}
+    return len(_VOLTAGES)
 
 
 @dataclass(frozen=True)
@@ -52,6 +90,8 @@ class BaseCase:
 
 
 def run_base_case() -> BaseCase:
+    import pandapower as pp
+
     net = load_network()
     pp.runpp(net, numba=False)
 

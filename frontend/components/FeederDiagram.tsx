@@ -3,7 +3,7 @@
 import cytoscape, { type Core, type EdgeSingular, type ElementDefinition } from "cytoscape";
 import { useEffect, useRef, useState } from "react";
 
-import type { GridState, Line, SwitchOp } from "@/lib/api";
+import type { GridState, Line, RiskLine, SwitchOp } from "@/lib/api";
 import { BUS_POSITIONS, CURVED_TIES } from "@/lib/layout";
 import type { Problems } from "@/lib/overlay";
 
@@ -23,8 +23,30 @@ export type Pulse = { ids: string[]; kind: "fi" | "open" | "close" | "fault"; ke
 
 type Tooltip = { x: number; y: number; title: string; lines: string[] };
 
+export type Risk = Record<string, RiskLine>;
+
+// What a fault on a line would leave dark after the best safe restoration, as a colour.
+export const RISK_STEPS: [number, string][] = [
+  [0, "#a7d7b5"], [300, "#fcd34d"], [600, "#f59e0b"], [1000, "#ea580c"], [2000, "#b91c1c"],
+];
+
+function riskColor(kw: number): string {
+  return RISK_STEPS.filter(([from]) => kw >= from).at(-1)![1];
+}
+
+function carriesText(line: Line): string[] {
+  if (!line.carries) return ["carries no load right now"];
+  const { kw, buses, critical } = line.carries;
+  return [
+    `carries ${Math.round(kw)} kW to ${buses} bus${buses === 1 ? "" : "es"}`,
+    ...(critical.length ? [`${critical.join(", ")} depend${critical.length === 1 ? "s" : ""} on it`] : []),
+  ];
+}
+
 // Hover text for a bus, segment or switch, read from the latest grid state.
-function describe(state: GridState, kind: string, id: string, clickable: boolean): Omit<Tooltip, "x" | "y"> {
+function describe(
+  state: GridState, kind: string, id: string, clickable: boolean, risk: Risk | null,
+): Omit<Tooltip, "x" | "y"> {
   if (kind === "bus") {
     const bus = state.buses.find((b) => `${b.id}` === id)!;
     if (bus.is_source) return { title: "Substation", lines: ["bus 1, feeder source"] };
@@ -35,10 +57,16 @@ function describe(state: GridState, kind: string, id: string, clickable: boolean
   }
   const line = state.lines.find((l) => l.id === id)!;
   if (line.type === "segment") {
+    const atRisk = risk?.[line.id];
     return {
       title: `Line ${line.id}`,
       lines: [
         `unswitched segment, rated ${line.cap_kva} kVA`,
+        ...carriesText(line),
+        ...(atRisk
+          ? [`if it faults: ${Math.round(atRisk.unserved_kw)} kW stays dark after the best safe restoration`,
+             atRisk.critical_dark.length ? `critical loads lost: ${atRisk.critical_dark.join(", ")}` : "no critical load lost"]
+          : []),
         ...(line.faulted ? ["FAULTED"] : []),
         ...(clickable ? ["click to fault this line"] : []),
       ],
@@ -50,6 +78,7 @@ function describe(state: GridState, kind: string, id: string, clickable: boolean
       `${line.status}${line.status !== line.normally ? ` (normally ${line.normally})` : ""}`,
       ...(line.fi && line.fi !== "none" ? [`fault indicator: ${line.fi}`] : []),
       `rated ${line.cap_kva} kVA`,
+      ...carriesText(line),
     ],
   };
 }
@@ -254,6 +283,9 @@ const STYLE: cytoscape.StylesheetJson = [
   },
   { selector: "node.low-v", style: { "border-color": COLORS.faulted, "border-width": 3 } },
   { selector: "edge.segment.hover", style: { width: 7 } },
+  // Risk map: segments coloured by what a fault there leaves dark; everything else recedes.
+  { selector: ".risk-faded", style: { opacity: 0.25 } },
+  { selector: "edge.risk", style: { width: 7, "line-color": "data(risk)", "line-style": "solid" } },
 ];
 
 type Props = {
@@ -262,12 +294,13 @@ type Props = {
   highlight?: SwitchOp[];
   pulse?: Pulse | null;
   problems?: Problems | null;
+  risk?: Risk | null;
 };
 
 const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-export default function FeederDiagram({ state, onSegmentClick, highlight = [], pulse, problems }: Props) {
+export default function FeederDiagram({ state, onSegmentClick, highlight = [], pulse, problems, risk = null }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
   // Elements are rebuilt on every state change, so handlers read the latest values.
@@ -275,6 +308,8 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [], p
   onClick.current = onSegmentClick;
   const latest = useRef(state);
   latest.current = state;
+  const latestRisk = useRef(risk);
+  latestRisk.current = risk;
   const liveBefore = useRef<Set<string> | null>(null);
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
 
@@ -302,7 +337,7 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [], p
     graph.on("mouseover", "node, edge[kind]", (event) => {
       const { x, y } = event.renderedPosition ?? event.target.renderedPosition();
       const info = describe(latest.current, event.target.data("kind"), event.target.data("ref"),
-        Boolean(onClick.current));
+        Boolean(onClick.current), latestRisk.current);
       setTooltip({ x, y, ...info });
     });
     graph.on("mouseout", "node, edge", () => setTooltip(null));
@@ -383,11 +418,24 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [], p
     for (const bus of problems.buses) graph.getElementById(`b${bus}`).addClass("low-v");
   }, [state, problems]);
 
+  useEffect(() => {
+    const graph = cy.current;
+    if (!graph) return;
+    graph.elements(".risk, .risk-faded").removeClass("risk risk-faded");
+    if (!risk) return;
+    graph.elements().not("edge.segment, node[kind = 'bus']").addClass("risk-faded");
+    graph.edges("edge.segment").forEach((edge) => {
+      const line = risk[edge.data("ref")];
+      if (line) edge.data("risk", riskColor(line.unserved_kw)).addClass("risk");
+    });
+  }, [state, risk]);
+
   return (
     <div className="diagram-wrap">
       <div ref={container} className="diagram" />
       {tooltip && (
-        <div className="tooltip" style={{ left: tooltip.x, top: tooltip.y }}>
+        // Near the top of the diagram there is no room above the cursor, so show it below.
+        <div className={tooltip.y < 150 ? "tooltip below" : "tooltip"} style={{ left: tooltip.x, top: tooltip.y }}>
           <b>{tooltip.title}</b>
           {tooltip.lines.map((line) => <div key={line}>{line}</div>)}
         </div>

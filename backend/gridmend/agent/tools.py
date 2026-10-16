@@ -9,6 +9,7 @@ from gridmend.flisr.isolate import IsolateError, isolate
 from gridmend.flisr.locate import LocateError, locate_fault
 from gridmend.flisr.trace import SwitchOp, open_incident
 from gridmend.flisr.verify import next_plan_id, verify_plan
+from gridmend.grid.dependency import line_dependencies
 from gridmend.grid.energize import grid_status
 
 
@@ -33,6 +34,10 @@ SWITCH_LIST = {"type": "array", "items": {"type": "string"}}
 SCHEMAS = [
     schema("grid_status", "Energized, dark and faulted zones, switch states and load served."),
     schema("locate_fault", "Find the faulted zone from the fault indicator chain."),
+    schema("line_dependencies", "For each energized line, the buses, load (kW) and critical "
+                                "facilities that depend on it in the current switching, "
+                                "heaviest first.",
+           {"top": {"type": "integer", "description": "how many lines to return (default 8)"}}),
     schema("isolation_plan", "Open the faulted zone's boundary switches and reclose the breaker. "
                              "Returns the switch operations performed."),
     schema("restoration_candidates", "Ranked candidate restoration plans built from graph searches "
@@ -94,6 +99,10 @@ class GridTools:
             "switches": {sw["id"]: f"{sw['kind']} {sw['status']}, fi {sw['fi']}"
                          for sw in s["switches"]},
         }
+
+    def line_dependencies(self, top: int | None = None) -> dict:
+        lines = line_dependencies(self.g)[: top or 8]
+        return {"lines": [{**d, "kw": round(d["kw"])} for d in lines]}
 
     def locate_fault(self) -> dict:
         location = locate_fault(self.g)

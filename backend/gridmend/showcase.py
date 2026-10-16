@@ -9,6 +9,7 @@ from gridmend.flisr.isolate import BOUNDARY_QUERY, faulted_zone
 from gridmend.flisr.locate import LOCATE_QUERY
 from gridmend.flisr.trace import TRACE_QUERY, open_incident
 from gridmend.flisr.verify import LOADING_QUERY
+from gridmend.grid.dependency import DEPENDENCY_QUERY
 from gridmend.grid.energize import ENERGIZED_QUERY
 from gridmend.grid.zones import ZONES_QUERY
 
@@ -22,6 +23,10 @@ STEPS = [
     ("energize", "Model", "Energization",
      "A bus is live when some path from the substation crosses only segments and closed "
      "switches.", ENERGIZED_QUERY, None),
+    ("depends", "Assess", "Line dependencies",
+     "What depends on each line right now: buses, load and critical facilities downstream. "
+     "The agent can call this as a tool, and the Feeder tab shows it on hover.",
+     DEPENDENCY_QUERY, None),
     ("locate", "Locate", "Fault location",
      "The faulted zone is the one whose upstream indicator is set while every downstream "
      "indicator is clear.", LOCATE_QUERY, None),

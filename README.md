@@ -16,13 +16,15 @@ any restoration can be explained afterwards, path by path.
   docker run --rm -p 7860:7860 ghcr.io/anish891/gridmend
   ```
 
-* **Live demo:** https://gridmend.onrender.com. It runs on Render's free tier (0.1 CPU), so it
-  sleeps when idle, takes about a minute to wake, and generating and verifying plans takes about
-  45 seconds there instead of two seconds locally.
+* **Live demo:** https://gridmend.onrender.com. It runs on Render's free tier (0.1 CPU) and sleeps
+  when idle, so the first visit takes about half a minute to wake it. After that a fault is
+  planned and verified in a few seconds; the LLM agent mode takes about a minute.
 
 Pick a demo fault (or click a line), watch the indicators, isolation and switching replay on the
-diagram, hover a rejected plan to see why it failed, then approve one that passed. The **Graph**
-tab shows the live Cypher behind every step and what it returns right now.
+diagram, hover a rejected plan to see why it failed, then approve one that passed. Switch the
+diagram to **Risk map** to see every line coloured by what a fault there would leave dark after
+the best safe restoration. The **Graph** tab shows the live Cypher behind every step and what it
+returns right now.
 
 ![GridMend after a fault on 4-5: hospital and fire station re-fed through ties 8-21 and 9-15](docs/feeder.png)
 
@@ -97,6 +99,9 @@ Remove FalkorDB and nothing is left: no twin, no forks, no paths, no trace.
 * **Fault location** is the zone at the end of the chain of set indicators.
 * **Restoration** is a search between dead and live zones over `BOUNDARY` edges, screened with
   parameterised what-if traversals that never touch the live state.
+* **Line dependencies** come from the same traversal: for every line, the buses, load and
+  critical facilities downstream of it right now. The agent can call it as a tool
+  (`line_dependencies`), and the diagram shows it on hover.
 * **Line loading** is computed in one query: every energized bus has exactly one path from the
   source in a radial feeder, so a line carries the load of the buses whose path uses it.
 * **Safety** comes from a forked graph per plan (`GRAPH.COPY`), checked before any switch moves.
@@ -342,18 +347,27 @@ npx @modelcontextprotocol/inspector "$(which gridmend)" mcp
 | Tool | Returns |
 |---|---|
 | `grid_status` | energized and dark zones, switch states, load served |
+| `line_dependencies` | per line: buses, load and critical facilities downstream |
 | `locate_fault` | faulted zone and indicator evidence chain |
 | `isolation_plan` | switch operations performed |
 | `restoration_candidates` | ranked candidate plans |
 | `verify_plan` | pass or fail, metrics, violations (by rank or explicit switches) |
+| `recommend_plan` | records the chosen verified plan and the reason in the trace |
 | `execute_plan` | applies a verified plan |
 | `explain_plan` | feeding paths, margins, rejected alternatives, critical loads |
 
 ### Single container
 
 The `Dockerfile` builds the UI as static files and runs FalkorDB, the API and the UI in one
-container on port 7860 (or `$PORT`). The evaluation runs during the image build, so the results
-page is ready immediately; on start the container only loads the feeder.
+container on port 7860 (or `$PORT`). Work that only depends on the fixed feeder is done once,
+while the image builds, so a small host starts in seconds:
+
+* the evaluation runs, so the results page and the risk map are ready immediately;
+* the loaded feeder is saved as a FalkorDB snapshot, so the container does not rebuild the graph;
+* the candidate pre-checks and power flows the evaluation computed for all 23 faults are saved.
+  Both depend only on which switches are closed, so a deployed plan reuses them, while every plan
+  is still applied to its own fork and checked for isolation, connectivity, radiality and
+  capacity in FalkorDB. A configuration the evaluation never saw runs a fresh power flow.
 
 ```bash
 docker build -t gridmend .

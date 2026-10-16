@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import AgentPanel from "@/components/AgentPanel";
 import CandidateList from "@/components/CandidateList";
 import ExplanationPanel from "@/components/ExplanationPanel";
-import FeederDiagram, { type Pulse } from "@/components/FeederDiagram";
+import FeederDiagram, { RISK_STEPS, type Pulse, type Risk } from "@/components/FeederDiagram";
 import Intro, { type Mode } from "@/components/Intro";
 import StatusStrip from "@/components/StatusStrip";
 import Stepper from "@/components/Stepper";
@@ -43,6 +43,21 @@ export default function Home() {
   const [agentModel, setAgentModel] = useState<string | null>(null);
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
   const [agentRunning, setAgentRunning] = useState(false);
+  const [risk, setRisk] = useState<Risk | null>(null);
+  const [showRisk, setShowRisk] = useState(false);
+
+  const toggleRisk = useCallback(async (on: boolean) => {
+    setShowRisk(on);
+    if (on && !risk) {
+      try {
+        const { lines } = await api.risk();
+        setRisk(Object.fromEntries(lines.map((l) => [l.line, l])));
+      } catch (e) {
+        setError((e as Error).message);
+        setShowRisk(false);
+      }
+    }
+  }, [risk]);
 
   const flash = useCallback((ids: string[], kind: Pulse["kind"]) => {
     setPulse({ ids, kind, key: Math.random() });
@@ -273,6 +288,12 @@ export default function Home() {
           <div className="card-head">
             <h2>IEEE 33-bus feeder</h2>
             <span className="muted small">hover any bus, line or switch for details</span>
+            <div className="view-switch" role="radiogroup" aria-label="Diagram view">
+              <button role="radio" aria-checked={!showRisk} className={!showRisk ? "on" : undefined}
+                onClick={() => toggleRisk(false)}>Live</button>
+              <button role="radio" aria-checked={showRisk} className={showRisk ? "on" : undefined}
+                onClick={() => toggleRisk(true)}>Risk map</button>
+            </div>
           </div>
           {state && (
             <FeederDiagram
@@ -280,8 +301,23 @@ export default function Home() {
               highlight={highlight}
               pulse={pulse}
               problems={problems}
+              risk={showRisk ? risk : null}
               onSegmentClick={healthy && !busy ? (line) => run("fault", line) : undefined}
             />
+          )}
+          {showRisk && (
+            <div className="risk-legend">
+              <span className="muted small">If this line faults, load still dark after the best safe restoration:</span>
+              <div className="risk-scale">
+                {RISK_STEPS.map(([from, color], i) => (
+                  <span key={from}>
+                    <i style={{ background: color }} />
+                    {i + 1 < RISK_STEPS.length ? `${from}-${RISK_STEPS[i + 1][0]}` : `${from}+`} kW
+                  </span>
+                ))}
+              </div>
+              <span className="muted small">From the 23-fault evaluation. Hover a line for the critical loads it would cost.</span>
+            </div>
           )}
           <ul className="legend">
             <li><span className="swatch live" /> energized</li>

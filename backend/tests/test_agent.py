@@ -99,3 +99,10 @@ def test_json_is_extracted_from_chatty_replies():
 def test_think_blocks_are_ignored():
     reply = '<think>maybe {"close": ["9-15"]}?</think>{"close": ["8-21"], "open": []}'
     assert parse_json_object(reply) == {"close": ["8-21"], "open": []}
+
+
+def test_line_dependencies_rank_lines_by_load_at_stake(falkordb, graph):
+    tools = GridTools(falkordb, graph, approve=lambda plan: True)
+    lines = tools.call("line_dependencies", {"top": 3})["lines"]
+    assert [l["line"] for l in lines] == ["1-2", "2-3", "3-4"]
+    assert lines[0]["buses"] == 32 and lines[0]["kw"] == 3715

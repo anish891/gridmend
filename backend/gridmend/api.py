@@ -1,9 +1,11 @@
 import json
 import os
+from contextlib import asynccontextmanager
 import queue
 import threading
 import time
 from dataclasses import asdict
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -11,16 +13,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from gridmend import db
-from gridmend.agent.llm import make_client
-from gridmend.agent.loop import ADVISOR_PROMPT, run_agent
-from gridmend.agent.tools import GridTools
 from gridmend.config import load_settings
-from gridmend.flisr.candidates import plan_restoration
+from gridmend.flisr.candidates import load_screens, plan_restoration
 from gridmend.flisr.execute import ExecuteError, execute_plan, verified_plans
 from gridmend.flisr.explain import explain_incident
 from gridmend.flisr.isolate import IsolateError, isolate
 from gridmend.flisr.locate import LocateError, locate_fault
 from gridmend.flisr.trace import incident_trace, open_incident, plan_details
+from gridmend.grid.case33 import load_voltages
+from gridmend.grid.dependency import line_dependencies
 from gridmend.grid.energize import grid_status
 from gridmend.grid.load import LIVE_GRAPH
 from gridmend.sim import FaultError, apply_fault, reset
@@ -28,7 +29,25 @@ from gridmend.sim import FaultError, apply_fault, reset
 # The graph the API serves; tests point it at a scratch copy.
 GRAPH_NAME = LIVE_GRAPH
 
-app = FastAPI(title="GridMend")
+# Written next to the evaluation results by `gridmend eval` (see eval/run.py).
+EVAL_OUT = Path(__file__).resolve().parents[1] / "eval" / "out"
+
+
+def load_caches() -> None:
+    # Screens and power flows computed while building the evaluation make the first plan on a
+    # slow host as fast as later ones; pandapower, slow to import there, then only loads for a
+    # configuration the evaluation never saw.
+    load_screens(EVAL_OUT / "screens.json")
+    load_voltages(EVAL_OUT / "voltages.json")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    load_caches()
+    yield
+
+
+app = FastAPI(title="GridMend", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3001", "http://127.0.0.1:3001"],
@@ -78,6 +97,7 @@ def state() -> dict:
         "MATCH (z:Zone) RETURN z.id, z.energized, z.faulted, z.p_kw ORDER BY z.id"
     ).result_set
     status = grid_status(g)
+    carried = {d["line"]: d for d in line_dependencies(g)}
     return {
         "buses": [
             {"id": b, "zone": zone, "energized": on, "critical": critical,
@@ -87,7 +107,8 @@ def state() -> dict:
         "lines": [
             {"id": lid, "from": a, "to": b, "type": "switch" if t == "SW" else "segment",
              "kind": kind or "segment", "status": status_ or "closed", "normally": normally,
-             "fi": fi, "faulted": bool(faulted), "cap_kva": cap}
+             "fi": fi, "faulted": bool(faulted), "cap_kva": cap,
+             "carries": carried.get(lid)}
             for lid, a, b, t, kind, status_, normally, fi, faulted, cap in lines
         ],
         "zones": [
@@ -237,6 +258,9 @@ def agent_run() -> StreamingResponse:
 
     def work() -> None:
         global _agent_last_finished
+        from gridmend.agent.loop import ADVISOR_PROMPT, run_agent
+        from gridmend.agent.tools import GridTools
+
         try:
             client, model = agent_client()
             tools = GridTools(conn, g, approve=lambda plan: False, can_execute=False)
@@ -265,6 +289,8 @@ def agent_run() -> StreamingResponse:
 
 
 def agent_client():
+    from gridmend.agent.llm import make_client
+
     return make_client()
 
 
@@ -273,6 +299,26 @@ def queries() -> dict:
     from gridmend.showcase import run_steps
 
     return {"graph": GRAPH_NAME, "steps": run_steps(live())}
+
+
+@app.get("/dependencies")
+def dependencies() -> dict:
+    return {"lines": line_dependencies(live())}
+
+
+@app.get("/risk")
+def risk() -> dict:
+    """Per faulted line: what stays dark after the best safe restoration, from the evaluation."""
+    from eval.run import load_results
+
+    rows = load_results()
+    if rows is None:
+        raise HTTPException(404, "no evaluation results yet; run `gridmend eval`")
+    return {"lines": [
+        {"line": r.fault, "unserved_kw": r.unserved_kw, "restored_kw": r.restored_kw,
+         "critical_dark": [c for c in r.critical_dark.split(";") if c]}
+        for r in rows if r.method == "gridmend"
+    ]}
 
 
 @app.get("/results")
