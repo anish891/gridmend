@@ -76,6 +76,11 @@ class CrewRequest(BaseModel):
     note: str
 
 
+class WhatIfRequest(BaseModel):
+    switches: list[str]
+    fault_line: str | None = None
+
+
 def live():
     return db.connect().select_graph(GRAPH_NAME)
 
@@ -374,6 +379,17 @@ def set_context(request: ContextRequest) -> dict:
         raise HTTPException(422, str(exc))
     finally:
         _agent_lock.release()
+
+
+@app.post("/whatif")
+def whatif(request: WhatIfRequest) -> dict:
+    from gridmend.flisr.whatif import WhatIfError, what_if
+
+    conn = db.connect()
+    try:
+        return what_if(conn, conn.select_graph(GRAPH_NAME), request.switches, request.fault_line)
+    except (WhatIfError, FaultError, LocateError, IsolateError) as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.get("/crew")

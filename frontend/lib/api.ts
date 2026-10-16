@@ -46,6 +46,36 @@ export type CrewFinding = { switch_id: string; operable: boolean; evidence: stri
 
 export type CrewReport = { id: string; note: string; other: string; findings: CrewFinding[] };
 
+export type WhatIfOutcome = {
+  isolation: string[];
+  cut_off: { zone: number; via: string }[];
+  plans_checked: number;
+  plans_passed: number;
+  plan: { ops: string[]; restored_kw: number; min_v_pu: number; max_loading_pct: number } | null;
+  restored_kw: number;
+  critical_restored: string[];
+  critical_dark: string[];
+};
+
+export type WhatIf = {
+  switches: string[];
+  fault_line: string | null;
+  as_is: WhatIfOutcome;
+  jammed: WhatIfOutcome;
+  kw_change: number;
+  critical_lost: string[];
+  critical_gained: string[];
+};
+
+export type SwitchingStep = {
+  step: number;
+  plan: string;
+  phase: "isolate" | "restore";
+  op: "open" | "close";
+  switch_id: string;
+  switch_kind: string;
+};
+
 export type CrewFiling = { report: string; findings: CrewFinding[]; other: string; rejected_plans: string[] };
 
 export type Incident = { id: string; status: string; zone: number } | null;
@@ -97,6 +127,7 @@ export type Explanation = {
   status: string;
   faulted_zone: number;
   isolation: string[];
+  switching_order: SwitchingStep[];
   plan: {
     id: string;
     ops: string[];
@@ -220,4 +251,6 @@ export const api = {
   clearConditions: () => call<OperatingContext>("DELETE", "/context"),
   crewReports: () => call<{ reports: CrewReport[] }>("GET", "/crew"),
   fileCrewReport: (note: string) => call<CrewFiling>("POST", "/crew", { note }),
+  whatIf: (switches: string[], faultLine: string | null) =>
+    call<WhatIf>("POST", "/whatif", { switches, fault_line: faultLine }),
 };

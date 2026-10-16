@@ -251,6 +251,9 @@ def print_explanation(e: dict) -> None:
         print("rejected alternatives:")
         for r in e["rejected"]:
             print(f"  {r['id']} ({', '.join(r['ops'])}): {'; '.join(r['violations'])}")
+    print("switching order:")
+    for s in e["switching_order"]:
+        print(f"  {s['step']}. {s['op']} {s['switch_kind']} {s['switch_id']}  ({s['phase']}, {s['plan']})")
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -440,6 +443,34 @@ def cmd_crew(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_whatif(args: argparse.Namespace) -> int:
+    from gridmend.flisr.isolate import IsolateError
+    from gridmend.flisr.locate import LocateError
+    from gridmend.flisr.whatif import WhatIfError, what_if
+    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.sim import FaultError
+
+    conn = db.connect()
+    try:
+        r = what_if(conn, conn.select_graph(LIVE_GRAPH), args.switches, args.fault)
+    except (WhatIfError, FaultError, LocateError, IsolateError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    for label, o in (("as things are", r["as_is"]), (f"if {', '.join(r['switches'])} cannot operate", r["jammed"])):
+        print(f"{label}:")
+        print(f"  isolation: {', '.join(o['isolation'])}")
+        for c in o["cut_off"]:
+            print(f"  Z{c['zone']} cut out with the fault ({c['via']} jammed)")
+        plan = o["plan"]
+        print(f"  best safe plan: {', '.join(plan['ops'])}, {plan['restored_kw']} kW" if plan
+              else "  no safe restoration plan")
+        print(f"  critical sites restored: {', '.join(o['critical_restored']) or 'none'}")
+    print(f"difference: {r['kw_change']:+} kW"
+          + (f"; loses {', '.join(r['critical_lost'])}" if r["critical_lost"] else "")
+          + (f"; gains {', '.join(r['critical_gained'])}" if r["critical_gained"] else ""))
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     from gridmend.sim import reset
 
@@ -472,6 +503,12 @@ def build_parser() -> argparse.ArgumentParser:
     fault.set_defaults(func=cmd_fault)
 
     sub.add_parser("reset", help="restore grid_live from grid_base").set_defaults(func=cmd_reset)
+
+    whatif = sub.add_parser("whatif", help="compare planning with and without switches that "
+                                           "cannot operate, on copies of the grid")
+    whatif.add_argument("switches", nargs="+", help="switch ids that cannot be operated")
+    whatif.add_argument("--fault", help="segment to fault first, when the feeder is healthy")
+    whatif.set_defaults(func=cmd_whatif)
 
     crew = sub.add_parser("crew", help="file a field crew's note; the LLM reads which switches "
                                        "are jammed or repaired")

@@ -1,5 +1,61 @@
+"use client";
+
+import { useState } from "react";
+
+import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
-import type { Explanation } from "@/lib/api";
+import type { Explanation, SwitchingStep } from "@/lib/api";
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+function orderText(e: Explanation): string {
+  return [
+    `Switching order, incident ${e.incident}: fault on line ${e.fault_line} in Z${e.faulted_zone}`,
+    ...e.switching_order.map((s) => `${s.step}. ${capitalize(s.op)} ${s.switch_kind} ${s.switch_id}`
+      + ` (${s.phase === "isolate" ? "isolation" : `restoration, ${s.plan}`})`),
+  ].join("\n");
+}
+
+// The steps exactly as carried out, numbered for the field crew, with a copy for their log.
+function SwitchingOrder({ e }: { e: Explanation }) {
+  const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
+  const phases: [string, SwitchingStep[]][] = [
+    ["Isolate the fault", e.switching_order.filter((s) => s.phase === "isolate")],
+    ["Restore", e.switching_order.filter((s) => s.phase === "restore")],
+  ];
+  const copyOrder = async () => {
+    try {
+      await navigator.clipboard.writeText(orderText(e));
+      setCopy("copied");
+    } catch {
+      // Clipboard access can be refused, e.g. outside a secure context.
+      setCopy("failed");
+    }
+    setTimeout(() => setCopy("idle"), 2500);
+  };
+  return (
+    <>
+      <div className="order-head">
+        <h3>Switching order</h3>
+        <Button variant="secondary" onClick={copyOrder}>
+          {copy === "copied" ? "Copied" : copy === "failed" ? "Copy failed" : "Copy"}
+        </Button>
+      </div>
+      {phases.filter(([, steps]) => steps.length).map(([label, steps]) => (
+        <div key={label}>
+          <div className="small muted">{label}</div>
+          <ol className="switching-order" start={steps[0].step}>
+            {steps.map((s) => (
+              <li key={s.step}>
+                <b>{capitalize(s.op)}</b> {s.switch_kind} <b>{s.switch_id}</b>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ))}
+    </>
+  );
+}
 
 export default function ExplanationPanel({ e }: { e: Explanation }) {
   return (
@@ -38,6 +94,7 @@ export default function ExplanationPanel({ e }: { e: Explanation }) {
           ) : (
             <p>No restoration plan passed verification, so nothing beyond isolation was executed.</p>
           )}
+          {e.switching_order.length > 0 && <SwitchingOrder e={e} />}
           {e.transfer.shortfall_kva > 0 && (
             <div className="callout">
               <span className="callout-tag">algo.maxFlow</span>

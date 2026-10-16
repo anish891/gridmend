@@ -31,6 +31,25 @@ def plan_steps(g: Graph, plan_id: str) -> list[str]:
     return [f"{op} {switch_id}" for op, switch_id in rows]
 
 
+def switching_order(g: Graph, incident_id: str) -> list[dict]:
+    """Every switch operation carried out for the incident, isolation first, numbered as an
+    operator's switching order."""
+    rows = g.ro_query(
+        """
+        MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {status: 'executed'})-[:STEP]->(o:SwitchOp)
+        MATCH ()-[s:SW]->() WHERE s.id = o.switch_id
+        RETURN p.id, p.kind, o.seq, o.op, o.switch_id, s.kind
+        """,
+        {"id": incident_id},
+    ).result_set
+    ordered = sorted(rows, key=lambda r: (r[1] != "isolation", r[2]))
+    return [
+        {"step": i, "plan": plan_id, "phase": "isolate" if kind == "isolation" else "restore",
+         "op": op, "switch_id": switch_id, "switch_kind": switch_kind}
+        for i, (plan_id, kind, _, op, switch_id, switch_kind) in enumerate(ordered, 1)
+    ]
+
+
 def rejected_plans(g: Graph, incident_id: str) -> list[dict]:
     rows = g.ro_query(
         """
@@ -166,6 +185,7 @@ def explain_incident(g: Graph, incident_id: str) -> dict:
         "status": incident[1],
         "faulted_zone": incident[2],
         "isolation": plan_steps(g, f"{incident_id}-iso"),
+        "switching_order": switching_order(g, incident_id),
         "plan": plan,
         "rejected": rejected_plans(g, incident_id),
         "transfer": transfer_limit(g),

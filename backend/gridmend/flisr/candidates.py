@@ -241,12 +241,12 @@ def rank_key(c: Candidate) -> tuple:
 
 
 def plan_restoration(
-    db: FalkorDB, g: Graph, incident_id: str
+    db: FalkorDB, g: Graph, incident_id: str, prefix: str = "p"
 ) -> list[tuple[Candidate, VerifyResult]]:
     """Generate and rank candidates, then verify the top ones on forks."""
     verified = []
     for candidate in generate_candidates(g)[:TOP_N]:
-        plan_id = next_plan_id(g, incident_id, "p")
+        plan_id = next_plan_id(g, incident_id, prefix)
         result = verify_plan(db, g, incident_id, plan_id, list(candidate.ops), list(candidate.claims))
         verified.append((candidate, result))
     return verified

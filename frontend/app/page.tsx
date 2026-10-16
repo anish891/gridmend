@@ -14,6 +14,7 @@ import StatusStrip from "@/components/StatusStrip";
 import Stepper from "@/components/Stepper";
 import Timeline from "@/components/Timeline";
 import TopBar from "@/components/TopBar";
+import WhatIf from "@/components/WhatIf";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
@@ -440,23 +441,11 @@ export default function Home() {
           </ul>
         </Card>
 
-        <div className="side">
-          {healthy ? (
-            <Intro />
-          ) : (
-            <Timeline fault={fault} location={location} trace={trace} conditions={context?.conditions ?? null} />
-          )}
-          {agentModel && state && status !== "restored" && (
-            <CrewReport
-              jammed={state.lines.filter((l) => !l.operable)}
-              busy={crewBusy}
-              error={crewError}
-              result={crewResult}
-              disabled={busy !== null}
-              onFile={fileCrewReport}
-            />
-          )}
-        </div>
+        {healthy ? (
+          <Intro />
+        ) : (
+          <Timeline fault={fault} location={location} trace={trace} conditions={context?.conditions ?? null} />
+        )}
       </div>
 
       {(agentRunning || agentEvents.length > 0) && (
@@ -484,6 +473,21 @@ export default function Home() {
             />
           )}
         </Card>
+      )}
+      {state && status !== "restored" && (
+        <div className="tools">
+          {agentModel && (
+            <CrewReport
+              jammed={state.lines.filter((l) => !l.operable)}
+              busy={crewBusy}
+              error={crewError}
+              result={crewResult}
+              disabled={busy !== null}
+              onFile={fileCrewReport}
+            />
+          )}
+          <WhatIf state={state} healthy={healthy} disabled={busy !== null} />
+        </div>
       )}
       {explanation && <ExplanationPanel e={explanation} />}
     </main>

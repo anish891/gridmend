@@ -29,7 +29,8 @@ Work in this order:
 
 Switches a field crew reported jammed cannot be operated. Isolation and the candidates already
 work around them; tell the operator what each jam cost (zones cut out with the fault, plans
-that could not be used).
+that could not be used). If a crew report or the conditions cast doubt on a switch your
+chosen plan needs, what_if shows what losing it would cost without touching the live grid.
 
 If no candidate passes verification, do not execute anything; explain why instead."""
 
@@ -57,7 +58,8 @@ Work in this order:
 
 Switches a field crew reported jammed cannot be operated. Isolation and the candidates already
 work around them; tell the operator what each jam cost (zones cut out with the fault, plans
-that could not be used).
+that could not be used). If a crew report or the conditions cast doubt on a switch your
+chosen plan needs, what_if shows what losing it would cost without touching the live grid.
 
 If no candidate passes verification, recommend nothing and explain why."""
 

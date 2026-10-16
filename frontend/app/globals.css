@@ -935,9 +935,11 @@ button:disabled {
 
 /* Field crew report */
 
-.side {
+.tools {
   display: grid;
-  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
 }
 
 .crew-form {
@@ -1007,6 +1009,82 @@ button:disabled {
 
 .box.jammed { border-color: var(--faulted); border-width: 3px; background: var(--text); }
 .swatch.cut-off { background: var(--faulted); opacity: 0.35; }
+
+/* What if */
+
+.whatif-form {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+
+.whatif-form label {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  font-weight: 500;
+}
+
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 6px var(--space-2);
+  max-width: 100%;
+}
+
+.whatif-result {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.whatif-result p { margin: 0; }
+
+.whatif-compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3) var(--space-5);
+}
+
+.whatif-side h3 { margin: 0 0 var(--space-1); }
+
+.whatif-side dl {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: var(--fs-md);
+}
+
+.whatif-side dt {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-top: var(--space-1);
+}
+
+.whatif-side dd { margin: 0; }
+
+/* Switching order */
+
+.order-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+.order-head h3 { margin: 0; }
+
+.switching-order {
+  margin: var(--space-1) 0 var(--space-2);
+  padding-left: 24px;
+  display: grid;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
 
 /* How it works */
 
@@ -1703,7 +1781,8 @@ tr.quiet td:not(.bad) { color: var(--muted); }
   /* Three short stats on one row, the critical sites full width beneath. */
   .status-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .status-bar .stat-wide { grid-column: 1 / -1; order: 1; border-top: 1px solid var(--border); border-left: 0; }
-  .layout { grid-template-columns: minmax(0, 1fr); }
+  .layout,
+  .tools { grid-template-columns: minmax(0, 1fr); }
   .explain-grid { grid-template-columns: minmax(0, 1fr); }
 }
 

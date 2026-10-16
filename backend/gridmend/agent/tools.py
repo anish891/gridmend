@@ -12,8 +12,10 @@ from gridmend.flisr.policy import current_context, load_policy
 from gridmend.flisr.transfer import transfer_limit
 from gridmend.flisr.trace import SwitchOp, open_incident
 from gridmend.flisr.verify import next_plan_id, verify_plan
+from gridmend.flisr.whatif import WhatIfError, what_if
 from gridmend.grid.dependency import line_dependencies
 from gridmend.grid.energize import grid_status
+from gridmend.sim import FaultError
 
 
 def schema(name: str, description: str, properties: dict | None = None,
@@ -60,6 +62,16 @@ SCHEMAS = [
          "close": {**SWITCH_LIST, "description": "switch ids to close"},
          "open": {**SWITCH_LIST, "description": "switch ids to open"}},
     ),
+    schema(
+        "what_if",
+        "Plan on throwaway copies of the grid as if these switches could not be operated, and "
+        "compare with planning as things are: isolation, zones cut out with the fault, the best "
+        "safe plan, kW and critical sites gained or lost. Nothing on the live grid changes. Give "
+        "fault_line only when the feeder is healthy.",
+        {"switches": {**SWITCH_LIST, "description": "switch ids that cannot be operated"},
+         "fault_line": {"type": "string", "description": "segment to fault, only if healthy"}},
+        ["switches"],
+    ),
     schema("recommend_plan", "Record which verified plan you recommend and why. The reason is "
                              "stored with the plan in the decision trace.",
            {"plan_id": {"type": "string"}, "reason": {"type": "string"}}, ["plan_id", "reason"]),
@@ -89,7 +101,8 @@ class GridTools:
             return {"error": f"unknown tool {name}"}
         try:
             return handler(**args)
-        except (LocateError, IsolateError, ExecuteError, ValueError, TypeError) as exc:
+        except (LocateError, IsolateError, ExecuteError, WhatIfError, FaultError, ValueError,
+                TypeError) as exc:
             return {"error": str(exc)}
 
     def incident_id(self) -> str:
@@ -187,6 +200,9 @@ class GridTools:
             "max_loading_pct": result.max_loading_pct and round(result.max_loading_pct),
             "violations": [f"{kind}: {detail}" for kind, detail in result.violations],
         }
+
+    def what_if(self, switches: list[str], fault_line: str | None = None) -> dict:
+        return what_if(self.db, self.g, switches, fault_line)
 
     def recommend_plan(self, plan_id: str, reason: str) -> dict:
         incident_id = self.incident_id()
