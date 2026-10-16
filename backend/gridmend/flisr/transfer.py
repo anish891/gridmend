@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from falkordb import Graph
 
 # Each line becomes a pair of FLOW edges, one per direction, because maxFlow follows edge
@@ -42,10 +44,8 @@ def transfer_limit(g: Graph) -> dict:
     Max flow ignores radiality and voltage and adds kVA as scalars, so it bounds what any
     switching plan can restore rather than describing one.
     """
-    fork = Graph(g.client, f"transfer_{g.name}")
-    if fork.name in g.client.execute_command("GRAPH.LIST"):
-        fork.delete()
-    fork = g.copy(fork.name)
+    # A unique name per call, since the API can serve two explanations at once.
+    fork = g.copy(f"transfer_{g.name}_{uuid4().hex[:8]}")
     try:
         build_flow_network(fork)
         demand = fork.ro_query(

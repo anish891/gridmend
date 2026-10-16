@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import ThemeToggle from "@/components/ThemeToggle";
+
 type Props = {
   page: "feeder" | "graph" | "results";
   children?: React.ReactNode;
@@ -22,7 +24,10 @@ export default function TopBar({ page, children }: Props) {
         <Link href="/graph/" className={page === "graph" ? "active" : undefined}>Graph</Link>
         <Link href="/results/" className={page === "results" ? "active" : undefined}>Results</Link>
       </nav>
-      <div className="topbar-actions">{children}</div>
+      <div className="topbar-actions">
+        {children}
+        <ThemeToggle />
+      </div>
     </header>
   );
 }

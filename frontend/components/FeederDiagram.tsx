@@ -4,20 +4,33 @@ import cytoscape, { type Core, type EdgeSingular, type ElementDefinition } from 
 import { useEffect, useRef, useState } from "react";
 
 import type { GridState, Line, RiskLine, SwitchOp } from "@/lib/api";
-import { BUS_POSITIONS, CURVED_TIES } from "@/lib/layout";
+import { BUS_POSITIONS, CURVED_TIES, LABEL_ABOVE, LABEL_LEFT } from "@/lib/layout";
 import type { Problems } from "@/lib/overlay";
+import { cssVar, onThemeChange } from "@/lib/theme";
 
-const COLORS = {
-  live: "#1e8e4e",
-  fresh: "#3ccf7a",
-  dark: "#b0b6bd",
-  faulted: "#d93025",
-  switchBorder: "#1f2328",
-  label: "#4a5058",
-  fi: "#e8710a",
-  close: "#1a73e8",
-  open: "#9334e6",
+// Diagram colours come from the page's theme tokens so the canvas follows light and dark mode.
+const COLOR_VARS = {
+  live: "--live",
+  fresh: "--fresh",
+  dark: "--dark",
+  faulted: "--faulted",
+  switch: "--switch",
+  label: "--diagram-label",
+  faint: "--diagram-faint",
+  panel: "--panel",
+  flow: "--flow",
+  fi: "--fi",
+  close: "--close",
+  open: "--open",
 };
+
+type Colors = Record<keyof typeof COLOR_VARS, string>;
+
+function readColors(): Colors {
+  return Object.fromEntries(
+    Object.entries(COLOR_VARS).map(([key, name]) => [key, cssVar(name)]),
+  ) as Colors;
+}
 
 export type Pulse = { ids: string[]; kind: "fi" | "open" | "close" | "fault"; key: number };
 
@@ -104,6 +117,8 @@ export function toElements(state: GridState): ElementDefinition[] {
     const classes = [busState(bus.id)];
     if (bus.critical) classes.push("critical");
     if (bus.is_source) classes.push("source");
+    if (LABEL_ABOVE.has(bus.id)) classes.push("label-above");
+    if (LABEL_LEFT.has(bus.id)) classes.push("label-left");
     return {
       group: "nodes",
       data: {
@@ -136,7 +151,9 @@ export function toElements(state: GridState): ElementDefinition[] {
       group: "nodes",
       data: { id: sw, label: line.id, kind: "line", ref: line.id },
       position: { x, y },
-      classes: `switch ${line.kind} ${line.status} fi-${line.fi}`,
+      // A switch on a vertical lateral is labelled beside the line instead of on it.
+      classes: `switch ${line.kind} ${line.status} fi-${line.fi}`
+        + (BUS_POSITIONS[line.from][0] === BUS_POSITIONS[line.to][0] ? " vertical" : ""),
     });
     for (const [bus, side] of [[from, "a"], [to, "b"]] as const) {
       const busId = Number(bus.slice(1));
@@ -175,18 +192,18 @@ function addFlowOverlay(graph: Core): void {
   graph.add(overlays);
 }
 
-const STYLE: cytoscape.StylesheetJson = [
+const styleFor = (COLORS: Colors): cytoscape.StylesheetJson => [
   {
     selector: "node",
     style: {
-      width: 12,
-      height: 12,
+      width: 14,
+      height: 14,
       "background-color": COLORS.dark,
       label: "data(label)",
-      "font-size": 10,
+      "font-size": 13,
       color: COLORS.label,
       "text-valign": "bottom",
-      "text-margin-y": 4,
+      "text-margin-y": 5,
       "transition-property": "width, height, border-width, border-color, background-color",
       "transition-duration": 0.35,
     },
@@ -195,31 +212,37 @@ const STYLE: cytoscape.StylesheetJson = [
   { selector: "node.faulted", style: { "background-color": COLORS.faulted } },
   {
     selector: "node.critical",
-    style: { shape: "star", width: 24, height: 24, "font-weight": "bold", "font-size": 11 },
+    style: { shape: "star", width: 28, height: 28, "font-weight": "bold", "font-size": 14 },
   },
-  { selector: "node.source", style: { shape: "round-rectangle", width: 34, height: 22 } },
+  { selector: "node.source", style: { shape: "round-rectangle", width: 40, height: 24, "font-weight": "bold" } },
   {
     selector: "node.switch",
     style: {
       shape: "rectangle",
-      width: 10,
-      height: 10,
-      "background-color": COLORS.switchBorder,
+      width: 12,
+      height: 12,
+      "background-color": COLORS.switch,
       "border-width": 1.5,
-      "border-color": COLORS.switchBorder,
-      "font-size": 8,
+      "border-color": COLORS.switch,
+      "font-size": 11,
       "text-valign": "top",
       "text-margin-y": -3,
     },
   },
-  { selector: "node.switch.open", style: { "background-color": "#ffffff" } },
-  { selector: "node.switch.tie", style: { "font-size": 7, color: "#80868b" } },
-  { selector: "node.switch.breaker", style: { width: 14, height: 14 } },
+  {
+    selector: "node.switch.vertical",
+    style: { "text-valign": "center", "text-halign": "right", "text-margin-x": 5, "text-margin-y": 0 },
+  },
+  { selector: "node.label-above", style: { "text-valign": "top", "text-margin-y": -5 } },
+  { selector: "node.label-left", style: { "text-halign": "left", "text-margin-x": -3 } },
+  { selector: "node.switch.open", style: { "background-color": COLORS.panel } },
+  { selector: "node.switch.tie", style: { "font-size": 10, color: COLORS.faint } },
+  { selector: "node.switch.breaker", style: { width: 16, height: 16 } },
   { selector: "node.switch.fi-set", style: { "border-color": COLORS.fi, "border-width": 3 } },
   {
     selector: "edge",
     style: {
-      width: 3,
+      width: 3.5,
       "line-color": COLORS.dark,
       "curve-style": "straight",
       "transition-property": "width, line-color",
@@ -235,8 +258,8 @@ const STYLE: cytoscape.StylesheetJson = [
     selector: "edge.flow",
     style: {
       width: 1.6,
-      "line-color": "#ffffff",
-      "line-opacity": 0.85,
+      "line-color": COLORS.flow,
+      "line-opacity": 0.7,
       "line-style": "dashed",
       "line-dash-pattern": [5, 9],
       events: "no",
@@ -272,7 +295,7 @@ const STYLE: cytoscape.StylesheetJson = [
       "font-size": 11,
       "font-weight": "bold",
       color: COLORS.faulted,
-      "text-background-color": "#ffffff",
+      "text-background-color": COLORS.panel,
       "text-background-opacity": 0.9,
       "text-background-padding": "2px",
     },
@@ -316,7 +339,7 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [], p
   useEffect(() => {
     const graph = cytoscape({
       container: container.current,
-      style: STYLE,
+      style: styleFor(readColors()),
       layout: { name: "preset" },
       autoungrabify: true,
       boxSelectionEnabled: false,
@@ -346,7 +369,7 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [], p
     // The container's size settles after mount and changes with the window, so refit.
     const observer = new ResizeObserver(() => {
       graph.resize();
-      graph.fit(undefined, 30);
+      graph.fit(undefined, 16);
     });
     observer.observe(container.current!);
 
@@ -359,7 +382,10 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [], p
     };
     if (!reducedMotion()) frame = requestAnimationFrame(animate);
 
+    const stopTheme = onThemeChange(() => graph.style(styleFor(readColors())));
+
     return () => {
+      stopTheme();
       cancelAnimationFrame(frame);
       observer.disconnect();
       graph.destroy();
@@ -375,7 +401,7 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [], p
     addFlowOverlay(graph);
     if (first) {
       graph.resize();
-      graph.fit(undefined, 30);
+      graph.fit(undefined, 16);
     }
 
     // Anything live now that was dark before glows briefly as power returns.

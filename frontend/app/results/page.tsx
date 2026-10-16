@@ -15,6 +15,10 @@ export default function ResultsPage() {
   }, []);
 
   const methods = results?.summary.map((s) => s.method) ?? [];
+  const ours = results?.summary.find((s) => s.method === "gridmend");
+  const best = results?.summary.find((s) => s.method === "optimal");
+  // Every baseline that switches without verification, for the safety comparison.
+  const unverified = results?.summary.filter((s) => s.method === "greedy" || s.method === "llm-only") ?? [];
   const faults = [...new Set(results?.rows.map((r) => r.fault) ?? [])];
 
   return (
@@ -24,6 +28,38 @@ export default function ResultsPage() {
 
       {results && (
         <>
+          {ours && (
+            <section className="headline">
+              <div className="kpi">
+                <div className="kpi-label">Of the optimum restored</div>
+                <div className="kpi-big">{ours.pct_optimal.toFixed(0)}%</div>
+                <div className="muted small">
+                  {Math.round(ours.restored_kw)} of {Math.round(best?.restored_kw ?? ours.restored_kw)} kW across 23 faults
+                </div>
+              </div>
+              <div className="kpi">
+                <div className="kpi-label">Unsafe plans executed</div>
+                <div className="kpi-big">{ours.unsafe_plans}</div>
+                <div className="muted small">
+                  {unverified.map((s) => `${s.method}: ${s.unsafe_plans}`).join(", ") || "every plan verified first"}
+                </div>
+              </div>
+              <div className="kpi">
+                <div className="kpi-label">Critical loads restored</div>
+                <div className="kpi-big">
+                  {ours.critical}
+                  {best && <span className="muted"> / {best.critical}</span>}
+                </div>
+                <div className="muted small">hospital, fire station, water pumping, telecom</div>
+              </div>
+              <div className="kpi">
+                <div className="kpi-label">Mean planning time</div>
+                <div className="kpi-big">{Math.round(ours.mean_plan_ms)} <span className="muted">ms</span></div>
+                <div className="muted small">per fault, including verification on graph forks</div>
+              </div>
+            </section>
+          )}
+
           <section className="card">
             <div className="card-head">
               <h2>All 23 single faults</h2>
@@ -64,12 +100,20 @@ export default function ResultsPage() {
           </section>
 
           <section className="card">
-            <h2>Restored load against the optimum</h2>
+            <div className="card-head">
+              <h2>Restored load against the optimum</h2>
+              <span className="muted small">hover a bar for its value</span>
+            </div>
             <ResultsChart rows={results.rows} />
           </section>
 
           <section className="card">
-            <h2>Restored kW per fault (violations in brackets)</h2>
+            <div className="card-head">
+              <h2>Restored kW per fault</h2>
+              <span className="muted small">
+                violations in brackets; greyed rows leave nothing restorable, so even the optimum restores 0 kW
+              </span>
+            </div>
             <table>
               <thead>
                 <tr>
@@ -79,7 +123,8 @@ export default function ResultsPage() {
               </thead>
               <tbody>
                 {faults.map((fault) => (
-                  <tr key={fault}>
+                  <tr key={fault}
+                    className={results.rows.some((r) => r.fault === fault && r.optimal_kw > 0) ? undefined : "quiet"}>
                     <td>{fault}</td>
                     {methods.map((m) => {
                       const r = results.rows.find((row) => row.fault === fault && row.method === m);

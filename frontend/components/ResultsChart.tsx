@@ -1,15 +1,23 @@
 import type { ResultRow } from "@/lib/api";
 
+// Series colours are theme tokens, applied through style so CSS variables resolve.
 const METHOD_COLORS: Record<string, string> = {
-  optimal: "#bdc1c6",
-  gridmend: "#2e9d57",
-  "llm-only": "#1a73e8",
-  greedy: "#f29900",
+  optimal: "var(--optimal)",
+  gridmend: "var(--live)",
+  "llm-only": "var(--llm)",
+  greedy: "var(--greedy)",
 };
 
-const WIDTH = 760;
-const HEIGHT = 260;
-const PAD = { left: 48, right: 8, top: 12, bottom: 36 };
+const WIDTH = 1100;
+const HEIGHT = 300;
+const PAD = { left: 52, right: 8, top: 14, bottom: 30 };
+
+// A round tick step (1, 2 or 5 times a power of ten) giving about four intervals.
+function tickStep(max: number): number {
+  const rough = max / 4;
+  const power = 10 ** Math.floor(Math.log10(rough));
+  return [1, 2, 5, 10].map((m) => m * power).find((step) => step >= rough)!;
+}
 
 // Grouped bars of restored kW per fault. An unsafe plan restores nothing and is marked with a red x.
 export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
@@ -17,27 +25,28 @@ export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
   const faults = [...new Set(rows.filter((r) => r.optimal_kw > 0).map((r) => r.fault))];
   if (faults.length === 0) return <p className="muted">No fault leaves restorable load.</p>;
 
-  const maxKw = Math.max(...rows.map((r) => r.optimal_kw));
+  const step = tickStep(Math.max(...rows.map((r) => r.optimal_kw)));
+  const top = Math.ceil(Math.max(...rows.map((r) => r.optimal_kw)) / step) * step;
+  const ticks = Array.from({ length: top / step + 1 }, (_, i) => i * step);
   const plotW = WIDTH - PAD.left - PAD.right;
   const plotH = HEIGHT - PAD.top - PAD.bottom;
   const groupW = plotW / faults.length;
-  const barW = (groupW * 0.8) / methods.length;
-  const y = (kw: number) => PAD.top + plotH - (kw / maxKw) * plotH;
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * maxKw));
+  const barW = (groupW * 0.7) / methods.length;
+  const y = (kw: number) => PAD.top + plotH - (kw / top) * plotH;
 
   return (
     <figure className="chart">
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label="Restored kW per fault by method">
         {ticks.map((kw) => (
           <g key={kw}>
-            <line x1={PAD.left} x2={WIDTH - PAD.right} y1={y(kw)} y2={y(kw)} stroke="#e8eaed" />
-            <text x={PAD.left - 6} y={y(kw) + 3} textAnchor="end" fontSize="10" fill="#5f6368">
+            <line x1={PAD.left} x2={WIDTH - PAD.right} y1={y(kw)} y2={y(kw)} style={{ stroke: "var(--chart-grid)" }} />
+            <text x={PAD.left - 8} y={y(kw) + 4} textAnchor="end" fontSize="12" style={{ fill: "var(--muted)" }}>
               {kw}
             </text>
           </g>
         ))}
         {faults.map((fault, i) => {
-          const x0 = PAD.left + i * groupW + groupW * 0.1;
+          const x0 = PAD.left + i * groupW + groupW * 0.15;
           return (
             <g key={fault}>
               {methods.map((method, j) => {
@@ -49,29 +58,29 @@ export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
                     <rect
                       x={x}
                       y={y(row.restored_kw)}
-                      width={barW - 1}
+                      width={barW - 2}
                       height={y(0) - y(row.restored_kw)}
-                      fill={METHOD_COLORS[method]}
+                      rx={2}
+                      style={{ fill: METHOD_COLORS[method] }}
                     >
                       <title>{`${method}: ${Math.round(row.restored_kw)} kW, ${row.violations} violations`}</title>
                     </rect>
                     {row.violations > 0 && (
-                      <text x={x + barW / 2} y={y(0) - 3} textAnchor="middle" fontSize="11" fill="#d93025">
+                      <text x={x + barW / 2} y={y(0) - 4} textAnchor="middle" fontSize="14" fontWeight="700"
+                        style={{ fill: "var(--faulted)" }}>
                         ×
                       </text>
                     )}
                   </g>
                 );
               })}
-              <text x={x0 + (groupW * 0.8) / 2} y={HEIGHT - 18} textAnchor="middle" fontSize="10" fill="#3c4043">
+              <text x={x0 + (groupW * 0.7) / 2} y={HEIGHT - 8} textAnchor="middle" fontSize="12"
+                style={{ fill: "var(--text)" }}>
                 {fault}
               </text>
             </g>
           );
         })}
-        <text x={PAD.left} y={HEIGHT - 4} fontSize="10" fill="#5f6368">
-          fault (only faults with restorable load); y: restored kW
-        </text>
       </svg>
       <figcaption className="legend">
         {methods.map((m) => (
@@ -80,8 +89,9 @@ export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
           </span>
         ))}
         <span>
-          <span style={{ color: "#d93025" }}>×</span> unsafe plan (restores nothing)
+          <span style={{ color: "var(--faulted)", fontWeight: 700 }}>×</span> unsafe plan (restores nothing)
         </span>
+        <span className="chart-note">Restored kW, faults that leave restorable load</span>
       </figcaption>
     </figure>
   );

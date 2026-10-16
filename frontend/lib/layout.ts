@@ -22,3 +22,8 @@ export const BUS_POSITIONS: Record<number, [number, number]> = {
 
 // Ties between two buses on the same row would sit on top of the feeder, so they bow out.
 export const CURVED_TIES = new Set(["9-15"]);
+
+// Bus labels normally sit below the bus. The upper lateral is labelled above it, and buses
+// where a lateral drops straight down are labelled to the left so the line does not cross it.
+export const LABEL_ABOVE = new Set([23, 24, 25]);
+export const LABEL_LEFT = new Set([2, 6]);

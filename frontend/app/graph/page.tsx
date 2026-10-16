@@ -12,13 +12,20 @@ function cell(value: unknown): string {
   return String(value);
 }
 
+function algorithms(cypher: string): string[] {
+  return [...new Set(cypher.match(/algo\.\w+/g) ?? [])];
+}
+
 function StepCard({ q }: { q: QueryStep }) {
   return (
-    <section className="card query">
+    <section className="card query" id={`q-${q.key}`}>
       <div className="query-head">
         <span className="step-chip">{q.step}</span>
         <h2>{q.title}</h2>
-        {q.ms !== undefined && <span className="muted small">{q.ms} ms</span>}
+        {algorithms(q.cypher).map((a) => (
+          <span key={a} className="algo-badge" title="FalkorDB built-in graph algorithm">{a}</span>
+        ))}
+        {q.ms !== undefined && <span className="muted small query-ms">{q.ms} ms</span>}
       </div>
       <p className="muted">{q.purpose}</p>
       <div className="query-body">
@@ -37,6 +44,7 @@ function StepCard({ q }: { q: QueryStep }) {
             <p className="muted">Not run: {q.skipped}.</p>
           ) : q.rows && q.rows.length > 0 ? (
             <>
+              <div className="table-scroll">
               <table>
                 <thead>
                   <tr>{q.columns!.map((c) => <th key={c}>{c}</th>)}</tr>
@@ -47,6 +55,7 @@ function StepCard({ q }: { q: QueryStep }) {
                   ))}
                 </tbody>
               </table>
+              </div>
               <p className="muted small">
                 {q.total_rows} row{q.total_rows === 1 ? "" : "s"}
                 {q.total_rows! > q.rows.length && `, first ${q.rows.length} shown`}
@@ -122,6 +131,15 @@ export default function GraphPage() {
           see the incident queries fill in.
         </p>
       </section>
+      {steps && (
+        <nav className="query-nav" aria-label="Steps">
+          {steps.map((q) => (
+            <a key={q.key} href={`#q-${q.key}`} className={algorithms(q.cypher).length ? "has-algo" : undefined}>
+              {q.title}
+            </a>
+          ))}
+        </nav>
+      )}
       {steps?.map((q, i) => (
         <div key={q.key}>
           {i === verifyAt && <ForkCard />}

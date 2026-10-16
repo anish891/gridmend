@@ -53,6 +53,7 @@ export default function CandidateList(props: Props) {
         <li
           key={c.plan_id}
           className={["candidate", c.passed ? "pass" : "fail", selected === c.plan_id && "selected",
+            c.plan_id === recommended && "recommended",
             executed === c.plan_id && "executed"].filter(Boolean).join(" ")}
           onMouseEnter={() => onSelect(c.plan_id)}
         >
@@ -112,7 +113,8 @@ export default function CandidateList(props: Props) {
           )}
           {c.violations.map((v, j) => (
             <div key={j} className="violation">
-              <span className="violation-type">{v.type}</span> {v.detail}
+              <span className="violation-type">{v.type}</span>
+              <span>{v.detail}</span>
             </div>
           ))}
 

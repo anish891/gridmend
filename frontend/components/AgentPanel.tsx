@@ -13,6 +13,13 @@ function describe(e: ToolEvent): { label: string; detail: string; bad?: boolean 
       return { label: "Located the fault", detail: `Z${r.faulted_zone} via ${r.indicator_chain.join(" → ")}` };
     case "isolation_plan":
       return { label: "Isolated it", detail: r.executed.join(", ") };
+    case "line_dependencies":
+      return { label: "Checked what depends on each line", detail: `${r.lines.length} lines` };
+    case "transfer_capacity":
+      return {
+        label: "Computed the transfer limit",
+        detail: `${r.deliverable_kva} of ${r.demand_kva} kVA deliverable${r.bottlenecks.length ? `, limited by ${r.bottlenecks.join(", ")}` : ""}`,
+      };
     case "restoration_candidates":
       return { label: "Asked for candidates", detail: `${r.candidates.length} ranked plans` };
     case "verify_plan": {

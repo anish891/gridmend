@@ -1,6 +1,7 @@
 """The Cypher behind each FLISR step, run read-only against the live graph (or a throwaway copy
 of it) for the UI."""
 import time
+from uuid import uuid4
 
 from falkordb import Graph
 
@@ -94,10 +95,8 @@ def path_zone(g: Graph) -> int | None:
 
 
 def run_on_fork(g: Graph, setup, query: str):
-    fork = Graph(g.client, f"showcase_{g.name}")
-    if fork.name in g.client.execute_command("GRAPH.LIST"):
-        fork.delete()
-    fork = g.copy(fork.name)
+    # A unique name per call: the page can be loaded twice at once.
+    fork = g.copy(f"showcase_{g.name}_{uuid4().hex[:8]}")
     try:
         setup(fork)
         start = time.perf_counter()
