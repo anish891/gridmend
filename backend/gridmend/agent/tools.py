@@ -5,7 +5,7 @@ from falkordb import FalkorDB, Graph
 from gridmend.flisr.candidates import Candidate, generate_candidates
 from gridmend.flisr.crew import crew_reports, jammed_switches
 from gridmend.flisr.execute import ExecuteError, execute_plan, verified_plans
-from gridmend.flisr.explain import explain_incident
+from gridmend.flisr.explain import explain_incident, feeding_path
 from gridmend.flisr.isolate import IsolateError, isolate
 from gridmend.flisr.locate import LocateError, locate_fault
 from gridmend.flisr.policy import current_context, load_policy
@@ -77,23 +77,39 @@ SCHEMAS = [
            {"plan_id": {"type": "string"}, "reason": {"type": "string"}}, ["plan_id", "reason"]),
     schema("execute_plan", "Execute a verified plan on the live grid after operator approval.",
            {"plan_id": {"type": "string"}}, ["plan_id"]),
+    schema("fault_impact", "What a fault on an unswitched line segment would cost: load still "
+                           "dark after the best safe restoration, critical sites lost and switch "
+                           "moves, from the evaluation of every single fault. Omit line to get "
+                           "every segment, worst first. Switches such as 1-2 cannot fault here.",
+           {"line": {"type": "string", "description": "segment id, for example 4-5"}}),
+    schema("feeding_path", "The switches power crosses from the substation to one bus right now, "
+                           "and whether the bus has power. Give a bus number, or a critical "
+                           "facility by name such as 'hospital'.",
+           {"bus": {"type": "integer", "description": "bus number, 1 to 33"},
+            "facility": {"type": "string", "description": "critical facility name"}}),
     schema("explain_plan", "Explain the incident: feeding paths of restored zones, margins, "
                            "rejected alternatives and the state of every critical load."),
 ]
+
+
+# Tools that only read the grid or plan on throwaway copies, for answering questions.
+READ_ONLY = frozenset({"operating_context", "grid_status", "line_dependencies", "transfer_capacity",
+                       "what_if", "fault_impact", "feeding_path", "explain_plan"})
 
 
 class GridTools:
     """The agent's only way to touch the grid. Every write is deterministic code."""
 
     def __init__(self, db: FalkorDB, g: Graph, approve: Callable[[dict], bool],
-                 can_execute: bool = True):
+                 can_execute: bool = True, only: frozenset[str] | None = None):
         self.db = db
         self.g = g
         self.approve = approve
         self.candidates: list[Candidate] = []
         # An advisor never gets the execute tool: the operator approves and executes.
         self.schemas = [s for s in SCHEMAS
-                        if can_execute or s["function"]["name"] != "execute_plan"]
+                        if (can_execute or s["function"]["name"] != "execute_plan")
+                        and (only is None or s["function"]["name"] in only)]
 
     def call(self, name: str, args: dict) -> dict:
         handler = getattr(self, name, None)
@@ -229,6 +245,46 @@ class GridTools:
             return {"executed": False, "reason": "operator declined"}
         ops = execute_plan(self.g, plan_id)
         return {"executed": True, "ops": [f"{op} {switch_id}" for switch_id, op in ops]}
+
+    def fault_impact(self, line: str | None = None) -> dict:
+        from eval.run import load_results
+
+        rows = {r.fault: r for r in load_results() or [] if r.method == "gridmend"}
+        if not rows:
+            raise ValueError("no evaluation results on this server")
+
+        def impact(r) -> dict:
+            return {"line": r.fault, "restored_kw": round(r.restored_kw),
+                    "still_dark_kw": round(r.unserved_kw),
+                    "critical_dark": [c for c in r.critical_dark.split(";") if c],
+                    "switch_moves": r.switch_ops}
+
+        if not line:
+            ranked = sorted(rows.values(), key=lambda r: r.unserved_kw, reverse=True)
+            return {"segments": [impact(r) for r in ranked]}
+        if line.strip() not in rows:
+            raise ValueError(f"{line} is not an unswitched segment; segments are {', '.join(rows)}")
+        return impact(rows[line.strip()])
+
+    def feeding_path(self, bus: int | None = None, facility: str | None = None) -> dict:
+        if bus is None and facility:
+            rows = self.g.ro_query(
+                "MATCH (b:Bus) WHERE toLower(b.facility) = toLower($name) RETURN b.id",
+                {"name": facility.strip()},
+            ).result_set
+            if not rows:
+                raise ValueError(f"no facility named {facility}")
+            bus = rows[0][0]
+        if bus is None:
+            raise ValueError("give a bus number or a facility name")
+        rows = self.g.ro_query(
+            "MATCH (b:Bus {id: $id}) RETURN b.energized, b.zone, b.facility", {"id": bus}
+        ).result_set
+        if not rows:
+            raise ValueError(f"no bus {bus}")
+        energized, zone, name = rows[0]
+        return {"bus": bus, "facility": name, "zone": zone, "energized": energized,
+                "switches": feeding_path(self.g, bus) if energized else []}
 
     def explain_plan(self) -> dict:
         return explain_incident(self.g, self.incident_id())

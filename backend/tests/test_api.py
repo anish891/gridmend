@@ -247,3 +247,51 @@ def test_planning_again_after_a_jam_recommends_from_the_new_round(client, graph,
     assert all(o["switch_id"] != "8-21" for c in again["candidates"] for o in c["ops"])
     state = client.get("/state").json()
     assert next(l for l in state["lines"] if l["id"] == "8-21")["operable"] is False
+
+
+class ScriptedAsker(ScriptedAdvisor):
+    """Answers "how is the hospital fed?" by tracing its feeding path."""
+
+    def create(self, model, messages, tools, temperature):
+        self.offered = [t["function"]["name"] for t in tools]
+        self.question = next(m["content"] for m in messages if m["role"] == "user")
+        results = [json.loads(m["content"]) for m in messages if m["role"] == "tool"]
+        if not results:
+            return self.call("feeding_path", {"facility": "hospital"})
+        path = " -> ".join(results[0]["switches"])
+        return self.wrap(ChatCompletionMessage(role="assistant", content=f"Fed via {path}."))
+
+
+@pytest.fixture
+def asker(client, monkeypatch):
+    model = ScriptedAsker()
+    monkeypatch.setenv("LLM_API_KEY", "test")
+    monkeypatch.setattr(api, "agent_client", lambda: (model, "scripted"))
+    monkeypatch.setattr(api, "ASK_COOLDOWN_S", 0)
+    return model
+
+
+def ask(client, question):
+    with client.stream("POST", "/ask", json={"question": question}) as response:
+        assert response.status_code == 200
+        return [json.loads(line[len("data: "):]) for line in response.iter_lines()
+                if line.startswith("data: ")]
+
+
+def test_questions_are_answered_from_the_graph_with_read_only_tools(client, asker):
+    events = ask(client, "How is the hospital fed?")
+
+    assert asker.question == "How is the hospital fed?"
+    assert set(asker.offered) == {"operating_context", "grid_status", "line_dependencies",
+                                  "transfer_capacity", "what_if", "fault_impact", "feeding_path",
+                                  "explain_plan"}
+    tool = events[0]
+    assert tool["name"] == "feeding_path"
+    assert tool["result"] == {"bus": 7, "facility": "hospital", "zone": 7, "energized": True,
+                              "switches": ["1-2", "2-3", "6-7"]}
+    assert events[-1] == {"type": "final", "text": "Fed via 1-2 -> 2-3 -> 6-7.", "model": "scripted"}
+
+
+def test_questions_must_be_short(client, asker):
+    assert client.post("/ask", json={"question": " "}).status_code == 422
+    assert client.post("/ask", json={"question": "x" * 301}).status_code == 422

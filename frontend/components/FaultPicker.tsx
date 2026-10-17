@@ -1,5 +1,8 @@
+import Link from "next/link";
+
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
+import type { Results } from "@/lib/api";
 import Segmented from "@/components/ui/Segmented";
 
 const DEMO_FAULTS = [
@@ -31,9 +34,27 @@ type Props = {
   // Today's conditions, shown before the faults because they set the priorities.
   conditions?: React.ReactNode;
   onDemo: () => void;
+  // The evaluation's headline numbers, when results are available.
+  results?: Results | null;
 };
 
-export default function FaultPicker({ disabled, onFault, agentModel, mode, onMode, conditions, onDemo }: Props) {
+function Headline({ results }: { results: Results }) {
+  const ours = results.summary.find((s) => s.method === "gridmend");
+  const ai = results.summary.find((s) => s.method === "llm-only");
+  const faults = new Set(results.rows.map((r) => r.fault)).size;
+  if (!ours) return null;
+  return (
+    <Link href="/results/" className="hero-stats" aria-label="Evaluation results">
+      <span><b>{ours.pct_optimal.toFixed(0)}%</b> of the best possible restoration</span>
+      <span><b>{ours.unsafe_plans}</b> unsafe plans across all {faults} faults</span>
+      {ai && <span>AI alone, without the graph: <b className="bad">{ai.unsafe_plans} of {faults}</b> unsafe</span>}
+    </Link>
+  );
+}
+
+export default function FaultPicker(
+  { disabled, onFault, agentModel, mode, onMode, conditions, onDemo, results }: Props,
+) {
   return (
     <Card className="hero">
       <h1>Simulate a fault and watch the feeder heal itself</h1>
@@ -41,6 +62,7 @@ export default function FaultPicker({ disabled, onFault, agentModel, mode, onMod
         GridMend finds the damaged section, cuts it out and re-routes power around it. Every plan is
         safety-checked on a copy of the grid before a single switch moves.
       </p>
+      {results && <Headline results={results} />}
       <div className="hero-demo">
         <Button disabled={disabled} onClick={onDemo}>
           <span aria-hidden="true">▶</span> Play the demo

@@ -1,5 +1,10 @@
 # GridMend: a self-healing grid agent on a FalkorDB twin
 
+> **100% of the best possible restoration, with 0 unsafe plans, across all 23 single faults.**
+> A language model planning the same faults alone, without the graph and the verifier, produced
+> unsafe switching in 20 of 23. GridMend plans from the graph, checks every plan on a forked copy
+> of it, and only then acts.
+
 GridMend restores power after a fault on a distribution feeder. It locates the fault from
 fault-indicator readings, isolates it, searches the graph for ways to re-feed the healthy
 areas, checks every candidate on a forked copy of the graph, and only then lets an operator
@@ -11,6 +16,10 @@ advisory, the cooling centre is open") and the LLM applies the utility's written
 policy to it. A field crew reports a jammed switch, and GridMend isolates and replans around it.
 An operator asks "what if 6-7 won't open?" and gets the answer from throwaway copies of the
 graph. The LLM only proposes; deterministic code checks every value before it reaches the graph.
+
+And it answers questions. **Ask the grid** takes "which line is most critical right now?" or "how
+is the hospital fed?", lets the LLM chain read-only graph tools to find out, answers with the
+evidence and the tools it used, and highlights the path or lines it relied on on the map.
 
 **Track:** 01, Agents That Act on Connected Data.
 
@@ -26,13 +35,15 @@ graph. The LLM only proposes; deterministic code checks every value before it re
   when idle, so the first visit takes about half a minute to wake it. After that a fault is
   planned and verified in a few seconds; the LLM agent mode takes about a minute.
 
-Pick today's conditions, then a demo fault (or click any line). Watch the indicators, isolation
+Press **Play the demo** for a 30-second guided run of the main-line fault, or pick today's
+conditions, then a demo fault (or click any line). Watch the indicators, isolation
 and switching replay on the map, select a plan to see it (or why it failed) on the map, and
 approve one that passed. File a crew note such as "the sectionalizer between 6 and 7 is jammed
 shut" and fault 4-5 again to see the hospital's zone cut out with the fault. Ask **What if a
 switch won't operate?** to compare outcomes without touching the live grid. Switch the map to
 **Risk map** to see every line coloured by what a fault there would leave dark. The **Graph** tab
-shows the live Cypher behind every step and what it returns right now.
+shows the live Cypher behind every step and what it returns right now. Ask the grid a question
+in plain words below the map.
 
 ![GridMend after a fault on 4-5: hospital and fire station re-fed through ties 8-21 and 9-15](docs/feeder.png)
 
@@ -64,7 +75,7 @@ as crew notes, not as clean data.
 | Act | Execute the approved plan on the live graph | Only plans whose status is `verified` |
 | Explain | Feeding path of every restored zone, margins, rejected alternatives, why each critical site is lit or dark, the conditions and crew reports in force, and a numbered switching order | Stored decision trace |
 
-The LLM never writes Cypher and never flips a switch. As the operator agent it calls twelve
+The LLM never writes Cypher and never flips a switch. As the operator agent it calls fourteen
 tools, chooses among plans that already passed verification, and explains the choice using only
 facts the tools returned. As a reader it turns the written policy and crew notes into structured
 values that code validates before writing. All writes to the graph are deterministic code.
@@ -330,7 +341,7 @@ All 23 single faults on unswitched segments of the IEEE 33-bus feeder, five meth
 |---|---:|---:|---:|---:|---:|---:|---:|
 | isolate-only | 0 | 0.0 | 0 | 0 | 0 | 0 | 0 |
 | greedy | 0 | 0.0 | 0 | 16 | 26 | 11 | 10 |
-| llm-only | 1170 | 23.6 | 3 | 62 | 50 | 20 | 14483 |
+| llm-only | 1170 | 23.6 | 3 | 59 | 26 | 20 | 14883 |
 | **gridmend** | **4950** | **100.0** | **11** | **17** | **0** | **0** | **491** |
 | optimal | 4950 | 100.0 | 11 | 17 | 0 | 0 | 314 |
 
@@ -348,26 +359,26 @@ All 23 single faults on unswitched segments of the IEEE 33-bus feeder, five meth
 Unsafe switching is scored as restoring nothing, since protection would trip it. On a feeder this
 small, GridMend's search over all tie subsets reaches the optimum; the point of the table is
 that it does so with zero violations, every plan verified on a fork, in well under a second.
-Planning times depend on the machine: the screenshot above is a run without the `llm-only`
-baseline on a laptop.
+Planning times depend on the machine. The `llm-only` baseline needs a model endpoint and is not
+deterministic, so `gridmend eval --llm-only` records its rows in
+[`backend/eval/llm_only.csv`](backend/eval/llm_only.csv) and every later `gridmend eval`, including
+the image build, replays them. The Results page also shows, as a faded bar, the load each unsafe
+plan claimed it would restore before the verifier caught it.
 
 ## Architecture
 
+![GridMend architecture: the UI, MCP clients and the LLM reach the grid only through agent tools; a deterministic pipeline verifies every plan on a FalkorDB fork before it runs](docs/architecture.svg)
+
+Where each part lives:
+
 ```
-            +------------------- FalkorDB ---------------------+
-            | grid_base | grid_live (twin + decision trace)     |
-            |           | fork_<planId>, whatif_* (throwaway)   |
-            +--------------------------------------------------+
-                 ^ Cypher / GRAPH.COPY (deterministic code only)
-                 |
-   gridmend.grid   load, zones, energization (case data -> graph)
-   gridmend.flisr  locate, isolate, candidates, verify (+ pandapower), execute, explain, trace,
-                   transfer (max flow), policy, crew reports, what-if
-                 |
-   gridmend.agent  12 tools --+-- LLM operator loop (any OpenAI-compatible endpoint)
-                              +-- MCP server (stdio)
-   gridmend.api    HTTP API --+-- Next.js + Cytoscape UI
-   eval            scenario runner, baselines, networkx/pandapower oracle
+gridmend.grid   load, zones, energization (case data -> graph)
+gridmend.flisr  locate, isolate, candidates, verify (+ pandapower), execute, explain, trace,
+                transfer (max flow), policy, crew reports, what-if
+gridmend.agent  14 tools --+-- LLM operator loop and Ask the grid (any OpenAI-compatible endpoint)
+                           +-- MCP server (stdio)
+gridmend.api    HTTP API --+-- Next.js + Cytoscape UI
+eval            scenario runner, baselines, networkx/pandapower oracle
 ```
 
 ## Run it locally
@@ -386,7 +397,7 @@ gridmend load                              # writes grid_base and grid_live
 gridmend run 4-5 --auto                    # fault -> locate -> isolate -> plan -> execute -> explain
 gridmend reset
 gridmend whatif 6-7 --fault 4-5            # what a jammed 6-7 would cost, on copies of the grid
-pytest                                     # 134 tests, on scratch graphs
+pytest                                     # 138 tests, on scratch graphs
 gridmend eval                              # writes backend/eval/out/results.{csv,md}
 gridmend api                               # HTTP API on :8000
 
@@ -435,11 +446,36 @@ Then:
 
 ### MCP
 
-`gridmend mcp` serves the same twelve tools over stdio:
+`gridmend mcp` serves the same fourteen tools over stdio, so any MCP client can locate, plan,
+verify and explain on the live twin. To browse and call them interactively:
 
 ```bash
 npx @modelcontextprotocol/inspector "$(which gridmend)" mcp
 ```
+
+Or from a script, without a browser:
+
+```bash
+npx @modelcontextprotocol/inspector --cli "$(which gridmend)" mcp --method tools/list
+npx @modelcontextprotocol/inspector --cli "$(which gridmend)" mcp \
+  --method tools/call --tool-name feeding_path --tool-arg facility=hospital
+```
+
+To add it to an MCP client, point the client's server configuration at the command (use the full
+path from `which gridmend`, and start FalkorDB first):
+
+```json
+{
+  "mcpServers": {
+    "gridmend": { "command": "/path/to/backend/.venv/bin/gridmend", "args": ["mcp"] }
+  }
+}
+```
+
+A good first session: fault a line with `gridmend fault 4-5`, then ask the client to restore
+service. It will typically call `locate_fault`, `isolation_plan`, `restoration_candidates`, then
+`verify_plan` for each candidate, and the client's own tool approval stands in for the operator's
+approval of `execute_plan`.
 
 | Tool | Returns |
 |---|---|
@@ -454,6 +490,8 @@ npx @modelcontextprotocol/inspector "$(which gridmend)" mcp
 | `what_if` | best safe outcome with and without given switches jammed, on copies of the grid |
 | `recommend_plan` | records the chosen verified plan and the reason in the trace |
 | `execute_plan` | applies a verified plan |
+| `fault_impact` | what a fault on a segment would cost (load left dark, critical sites lost), or every segment ranked |
+| `feeding_path` | the switches power crosses from the substation to a bus or named facility, right now |
 | `explain_plan` | feeding paths, margins, rejected alternatives, critical sites, conditions, crew reports, switching order |
 
 ### Single container

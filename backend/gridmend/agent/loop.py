@@ -63,7 +63,21 @@ chosen plan needs, what_if shows what losing it would cost without touching the 
 
 If no candidate passes verification, recommend nothing and explain why."""
 
+# Answers an operator's question from the graph. Only read-only tools are offered.
+ASK_PROMPT = """You are GridMend, an assistant to a distribution grid operator. Answer the
+operator's question about the feeder using only your tools; the grid twin lives in a graph
+database. You can read the grid and plan on throwaway copies, but you cannot change anything.
+
+Call the tools that the question needs, chaining them when one answer leads to the next
+question. Then reply in at most 120 words: answer first, then the evidence (zones, lines,
+switches, kW, paths) exactly as the tools returned it. Name the tools you relied on in a final
+line starting "Based on:". If the tools cannot answer it, say so plainly."""
+
+INCIDENT_TASK = "The feeder breaker just tripped. Restore service."
+
 MAX_STEPS = 25
+# A question should take a few tool calls; this bounds the wait on a public demo.
+ASK_STEPS = 8
 
 
 def tool_result(content: dict) -> str:
@@ -76,12 +90,14 @@ def run_agent(
     tools: GridTools,
     on_step: Callable[[str, dict, dict], None] = lambda name, args, result: None,
     prompt: str = SYSTEM_PROMPT,
+    task: str = INCIDENT_TASK,
+    max_steps: int = MAX_STEPS,
 ) -> str:
     messages = [
         {"role": "system", "content": prompt},
-        {"role": "user", "content": "The feeder breaker just tripped. Restore service."},
+        {"role": "user", "content": task},
     ]
-    for _ in range(MAX_STEPS):
+    for _ in range(max_steps):
         reply = client.chat.completions.create(
             model=model, messages=messages, tools=tools.schemas, temperature=0
         )

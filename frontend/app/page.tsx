@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import AgentPanel from "@/components/AgentPanel";
+import AskPanel, { type MapFocus } from "@/components/AskPanel";
 import CandidateList from "@/components/CandidateList";
 import Conditions from "@/components/Conditions";
 import CrewReport from "@/components/CrewReport";
@@ -23,7 +24,7 @@ import Spinner from "@/components/ui/Spinner";
 import Term from "@/components/ui/Term";
 import {
   api, runAgent, type AgentEvent, type CrewFiling, type Explanation, type GridState, type Location,
-  type OperatingContext, type PlanResult, type SwitchOp, type Trace,
+  type OperatingContext, type PlanResult, type Results, type SwitchOp, type Trace,
 } from "@/lib/api";
 import { problemsFor, withSwitch } from "@/lib/overlay";
 
@@ -72,8 +73,9 @@ export default function Home() {
   const [crewResult, setCrewResult] = useState<CrewFiling | null>(null);
   const [risk, setRisk] = useState<Risk | null>(null);
   const [showRisk, setShowRisk] = useState(false);
-  const [pathZone, setPathZone] = useState<number | null>(null);
+  const [focus, setFocus] = useState<MapFocus | null>(null);
   const [demo, setDemo] = useState(false);
+  const [results, setResults] = useState<Results | null>(null);
 
   const toggleRisk = useCallback(async (on: boolean) => {
     setShowRisk(on);
@@ -264,10 +266,10 @@ export default function Home() {
       if (explained?.plan) {
         for (const zone of Object.keys(explained.plan.paths).map(Number)) {
           working(STEP.restored, `Z${zone} is fed again through ${explained.plan.paths[zone].join(" → ")}`);
-          setPathZone(zone);
+          setFocus({ bus: zone, lines: [] });
           await pause(2400);
         }
-        setPathZone(null);
+        setFocus(null);
       }
       reveal("explanation");
     } finally {
@@ -320,7 +322,7 @@ export default function Home() {
       setTrace(null);
       setExplanation(null);
       setAgentEvents([]);
-      setPathZone(null);
+      setFocus(null);
       setCrewResult(null);
       setCrewError(null);
       await refresh();
@@ -335,6 +337,8 @@ export default function Home() {
 
   useEffect(() => {
     api.context().then(setContext).catch(() => setContext(null));
+    // Only for the headline numbers; the page works without them.
+    api.results().then(setResults).catch(() => setResults(null));
   }, []);
 
   useEffect(() => {
@@ -405,6 +409,7 @@ export default function Home() {
       ) : picking ? (
         <FaultPicker
           onDemo={playDemo}
+          results={results}
           disabled={busy !== null || contextBusy || crewBusy}
           onFault={(line) => run("fault", line)}
           agentModel={agentModel}
@@ -455,7 +460,7 @@ export default function Home() {
               pulse={pulse}
               problems={problems}
               risk={showRisk ? risk : null}
-              pathZone={pathZone}
+              focus={focus}
               onSegmentClick={healthy && !busy && !demo && !contextBusy && !crewBusy ? (line) => run("fault", line) : undefined}
             />
           )}
@@ -517,6 +522,7 @@ export default function Home() {
         )}
       </div>
 
+      {agentModel && state && <AskPanel incident={!healthy} onFocus={setFocus} />}
       {(agentRunning || agentEvents.length > 0) && (
         <AgentPanel model={agentModel} events={agentEvents} running={agentRunning} />
       )}
@@ -559,7 +565,9 @@ export default function Home() {
           <WhatIf state={state} healthy={healthy} disabled={busy !== null} />
         </div>
       )}
-      {explanation && <ExplanationPanel e={explanation} onPath={setPathZone} />}
+      {explanation && (
+        <ExplanationPanel e={explanation} onPath={(zone) => setFocus(zone === null ? null : { bus: zone, lines: [] })} />
+      )}
     </main>
   );
 }

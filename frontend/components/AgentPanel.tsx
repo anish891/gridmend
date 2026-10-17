@@ -2,10 +2,10 @@ import Card from "@/components/ui/Card";
 import Spinner from "@/components/ui/Spinner";
 import type { AgentEvent } from "@/lib/api";
 
-type ToolEvent = Extract<AgentEvent, { type: "tool" }>;
+export type ToolEvent = Extract<AgentEvent, { type: "tool" }>;
 
 // One line per tool call, in the operator's words.
-function describe(e: ToolEvent): { label: string; detail: string; bad?: boolean } {
+export function describe(e: ToolEvent): { label: string; detail: string; bad?: boolean } {
   const r = e.result as Record<string, any>;
   if (r.error) return { label: e.name, detail: String(r.error), bad: true };
   switch (e.name) {
@@ -32,13 +32,29 @@ function describe(e: ToolEvent): { label: string; detail: string; bad?: boolean 
       return { label: `Recommended ${r.recommended}`, detail: String(e.args.reason ?? "") };
     case "explain_plan":
       return { label: "Read the decision trace", detail: "" };
+    case "operating_context":
+      return { label: "Read today's conditions and priorities", detail: "" };
+    case "feeding_path":
+      return {
+        label: `Traced the feed to bus ${r.bus}${r.facility ? ` (${r.facility})` : ""}`,
+        detail: r.energized ? r.switches.join(" → ") : "no power",
+      };
+    case "fault_impact":
+      return r.segments
+        ? { label: "Ranked every line by what a fault would cost", detail: `worst: ${r.segments[0].line}, ${r.segments[0].still_dark_kw} kW dark` }
+        : { label: `Looked up a fault on ${r.line}`, detail: `${r.still_dark_kw} kW stays dark` };
+    case "what_if":
+      return {
+        label: `Planned as if ${r.switches.join(", ")} could not move`,
+        detail: `${r.jammed.restored_kw} kW restorable, ${r.kw_change >= 0 ? "+" : ""}${r.kw_change} kW vs. as is`,
+      };
     default:
       return { label: e.name, detail: "" };
   }
 }
 
 // The model writes light markdown; keep headings, paragraphs, bullets, tables and bold.
-function Answer({ text }: { text: string }) {
+export function Answer({ text }: { text: string }) {
   const bold = (line: string) =>
     line.split(/\*\*(.+?)\*\*/g).map((part, i) => (i % 2 ? <b key={i}>{part}</b> : part));
   const cells = (line: string) => line.replace(/^\||\|$/g, "").split("|").map((c) => c.trim());

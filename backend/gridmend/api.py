@@ -1,5 +1,6 @@
 import json
 import os
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 import queue
 import threading
@@ -277,28 +278,78 @@ def agent_run() -> StreamingResponse:
         _agent_lock.release()
         raise HTTPException(429, f"the agent is cooling down; try again in {int(wait) + 1} s")
 
+    from gridmend.agent.loop import ADVISOR_PROMPT, INCIDENT_TASK
+    from gridmend.agent.tools import GridTools
+
+    def done() -> None:
+        global _agent_last_finished
+        _agent_last_finished = time.monotonic()
+        _agent_lock.release()
+
+    tools = GridTools(conn, g, approve=lambda plan: False, can_execute=False)
+    return agent_stream(tools, ADVISOR_PROMPT, INCIDENT_TASK, done)
+
+
+# Questions are short and read-only, so they wait less between runs than incidents.
+ASK_COOLDOWN_S = float(os.getenv("ASK_COOLDOWN_S", "5"))
+_ask_last_finished = 0.0
+
+
+class Question(BaseModel):
+    question: str
+
+
+@app.post("/ask")
+def ask(body: Question) -> StreamingResponse:
+    from gridmend.agent.loop import ASK_PROMPT, ASK_STEPS
+    from gridmend.agent.tools import READ_ONLY, GridTools
+
+    if not load_settings().llm_configured:
+        raise HTTPException(503, "no LLM is configured on this server")
+    question = body.question.strip()
+    if not question or len(question) > 300:
+        raise HTTPException(422, "ask a question of at most 300 characters")
+    if not _agent_lock.acquire(blocking=False):
+        raise HTTPException(429, "the assistant is busy; try again shortly")
+    wait = ASK_COOLDOWN_S - (time.monotonic() - _ask_last_finished)
+    if wait > 0:
+        _agent_lock.release()
+        raise HTTPException(429, f"try again in {int(wait) + 1} s")
+
+    def done() -> None:
+        global _ask_last_finished
+        _ask_last_finished = time.monotonic()
+        _agent_lock.release()
+
+    conn = db.connect()
+    tools = GridTools(conn, conn.select_graph(GRAPH_NAME), approve=lambda plan: False,
+                      can_execute=False, only=READ_ONLY)
+    return agent_stream(tools, ASK_PROMPT, question, done, ASK_STEPS)
+
+
+def agent_stream(tools, prompt: str, task: str, done: Callable[[], None],
+                 max_steps: int | None = None) -> StreamingResponse:
+    """Run the agent in a thread and stream one server-sent event per tool call, then its answer."""
+    from gridmend.agent.loop import MAX_STEPS, run_agent
+
     events: queue.Queue = queue.Queue()
 
     def work() -> None:
-        global _agent_last_finished
-        from gridmend.agent.loop import ADVISOR_PROMPT, run_agent
-        from gridmend.agent.tools import GridTools
-
         try:
             client, model = agent_client()
-            tools = GridTools(conn, g, approve=lambda plan: False, can_execute=False)
             answer = run_agent(
                 client, model, tools,
                 on_step=lambda name, args, result: events.put(
                     {"type": "tool", "name": name, "args": args, "result": result}),
-                prompt=ADVISOR_PROMPT,
+                prompt=prompt,
+                task=task,
+                max_steps=max_steps or MAX_STEPS,
             )
             events.put({"type": "final", "text": answer, "model": model})
         except Exception as exc:
             events.put({"type": "error", "detail": str(exc)})
         finally:
-            _agent_last_finished = time.monotonic()
-            _agent_lock.release()
+            done()
             events.put(None)
 
     threading.Thread(target=work, daemon=True).start()

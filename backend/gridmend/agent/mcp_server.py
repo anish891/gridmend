@@ -82,6 +82,16 @@ def execute_plan(plan_id: str) -> dict:
     return tools().call("execute_plan", {"plan_id": plan_id})
 
 
+@server.tool(description=DESCRIPTIONS["fault_impact"])
+def fault_impact(line: str | None = None) -> dict:
+    return tools().call("fault_impact", {"line": line})
+
+
+@server.tool(description=DESCRIPTIONS["feeding_path"])
+def feeding_path(bus: int | None = None, facility: str | None = None) -> dict:
+    return tools().call("feeding_path", {"bus": bus, "facility": facility})
+
+
 @server.tool(description=DESCRIPTIONS["explain_plan"])
 def explain_plan() -> dict:
     return tools().call("explain_plan", {})

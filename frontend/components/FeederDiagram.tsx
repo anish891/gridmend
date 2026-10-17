@@ -405,15 +405,15 @@ type Props = {
   pulse?: Pulse | null;
   problems?: Problems | null;
   risk?: Risk | null;
-  // Zone whose feeding path from the substation to highlight.
-  pathZone?: number | null;
+  // What to pick out on the map: the feeding path to a bus (and its zone), and particular lines.
+  focus?: { bus: number | null; lines: string[] } | null;
 };
 
 const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export default function FeederDiagram(
-  { state, onSegmentClick, highlight = [], pulse, problems, risk = null, pathZone = null }: Props,
+  { state, onSegmentClick, highlight = [], pulse, problems, risk = null, focus = null }: Props,
 ) {
   const container = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
@@ -551,18 +551,27 @@ export default function FeederDiagram(
     const graph = cy.current;
     if (!graph) return;
     graph.elements(".path, .path-dim, .path-zone").removeClass("path path-dim path-zone");
-    if (pathZone === null) return;
-    // The feeder is radial, so the shortest live route from the substation is the only one.
-    const route = graph.elements("edge.live").union(graph.nodes()).aStar({
-      root: "#b1", goal: `#b${pathZone}`, directed: false,
-    });
-    if (!route.found) return;
-    const zone = graph.getElementById(`z${pathZone}`);
-    const keep = route.path.union(zone).union(zone.children());
-    route.path.addClass("path");
-    zone.addClass("path-zone");
-    graph.elements().not(keep).not("node.zone").addClass("path-dim");
-  }, [state, pathZone]);
+    if (!focus) return;
+    let keep = graph.collection();
+    if (focus.bus !== null) {
+      // The feeder is radial, so the shortest live route from the substation is the only one.
+      const route = graph.elements("edge.live").union(graph.nodes()).aStar({
+        root: "#b1", goal: `#b${focus.bus}`, directed: false,
+      });
+      if (route.found) {
+        const zone = graph.getElementById(`b${focus.bus}`).parent();
+        route.path.addClass("path");
+        zone.addClass("path-zone");
+        keep = keep.union(route.path).union(zone).union(zone.children());
+      }
+    }
+    for (const id of focus.lines) {
+      const parts = graph.elements(`#l${id}, #s${id}, #s${id}-a, #s${id}-b`);
+      parts.addClass("path");
+      keep = keep.union(parts).union(parts.connectedNodes());
+    }
+    if (keep.nonempty()) graph.elements().not(keep).not("node.zone").addClass("path-dim");
+  }, [state, focus]);
 
   return (
     <div className="diagram-wrap">

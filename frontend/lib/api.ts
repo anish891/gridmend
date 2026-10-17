@@ -200,11 +200,26 @@ export type AgentEvent =
   | { type: "error"; detail: string };
 
 // The agent streams one server-sent event per tool call, then its final answer.
-export async function runAgent(onEvent: (event: AgentEvent) => void): Promise<void> {
-  const response = await fetch(`${API_URL}/agent/run`, { method: "POST", cache: "no-store" });
+export function runAgent(onEvent: (event: AgentEvent) => void): Promise<void> {
+  return streamAgent("/agent/run", undefined, onEvent);
+}
+
+// A question about the grid, answered by the agent with read-only tools.
+export function askGrid(question: string, onEvent: (event: AgentEvent) => void): Promise<void> {
+  return streamAgent("/ask", { question }, onEvent);
+}
+
+async function streamAgent(path: string, body: unknown, onEvent: (event: AgentEvent) => void): Promise<void> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    cache: "no-store",
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
   if (!response.ok || !response.body) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(data.detail ?? `the agent could not start (${response.status})`);
+    const detail = Array.isArray(data.detail) ? data.detail[0]?.msg : data.detail;
+    throw new Error(detail ?? `the agent could not start (${response.status})`);
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();

@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 700" width="960" height="700" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5d646d"/>
+    </marker>
+  </defs>
+  <style>
+    .box { fill: #ffffff; stroke: #cfd5dc; stroke-width: 1.5; }
+    .llm { fill: #eef4fe; stroke: #5b8def; }
+    .core { fill: #e6f4ec; stroke: #1e8e4e; }
+    .db { fill: #f3effc; stroke: #7a52c7; }
+    .sub { fill: #ffffff; stroke: #b9a6e6; stroke-width: 1.2; }
+    .title { font-size: 15px; font-weight: 700; fill: #1f2328; }
+    .text { font-size: 12.5px; fill: #3d444d; }
+    .small { font-size: 11.5px; fill: #5d646d; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; fill: #3d444d; }
+    .edge { stroke: #5d646d; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+    .both { marker-start: url(#arrow); }
+    .label { font-size: 11px; fill: #5d646d; }
+    .rule { font-size: 13px; font-weight: 600; fill: #1e6b3d; }
+  </style>
+
+  <rect x="0" y="0" width="960" height="700" rx="14" fill="#f7f8fa"/>
+
+  <!-- Row 1: who uses it -->
+  <rect class="box" x="40" y="28" width="260" height="70" rx="10"/>
+  <text class="title" x="56" y="56">Operator, in the web UI</text>
+  <text class="small" x="56" y="78">Next.js + Cytoscape feeder map, approve plans</text>
+
+  <rect class="box" x="350" y="28" width="260" height="70" rx="10"/>
+  <text class="title" x="366" y="56">Any MCP client</text>
+  <text class="small" x="366" y="78">assistants and IDEs call the same tools</text>
+
+  <rect class="box llm" x="660" y="28" width="260" height="70" rx="10"/>
+  <text class="title" x="676" y="56">LLM (OpenAI-compatible)</text>
+  <text class="small" x="676" y="78">chooses tools, picks among verified plans</text>
+
+  <!-- Row 2: entry points -->
+  <rect class="box" x="40" y="148" width="260" height="62" rx="10"/>
+  <text class="title" x="56" y="174">HTTP API</text>
+  <text class="small" x="56" y="194">FastAPI, streams agent runs and answers</text>
+
+  <rect class="box" x="350" y="148" width="260" height="62" rx="10"/>
+  <text class="title" x="366" y="174">MCP server</text>
+  <text class="small" x="366" y="194">stdio, 14 tools</text>
+
+  <rect class="box llm" x="660" y="148" width="260" height="62" rx="10"/>
+  <text class="title" x="676" y="174">Agent loop</text>
+  <text class="small" x="676" y="194">operator agent, and Ask the grid (read-only)</text>
+
+  <path class="edge" d="M170 98 V146"/>
+  <text class="label" x="178" y="127">HTTP</text>
+  <path class="edge" d="M480 98 V146"/>
+  <text class="label" x="488" y="127">stdio</text>
+  <path class="edge both" d="M790 100 V146"/>
+  <text class="label" x="798" y="127">tool calls</text>
+  <path class="edge" d="M280 210 C 300 240, 640 240, 676 212"/>
+
+  <!-- Row 3: tools -->
+  <rect class="box llm" x="40" y="260" width="880" height="94" rx="10"/>
+  <text class="title" x="56" y="287">Agent tools: the LLM's only way to touch the grid</text>
+  <text class="mono" x="56" y="310">operating_context · grid_status · line_dependencies · locate_fault · isolation_plan</text>
+  <text class="mono" x="56" y="327">restoration_candidates · transfer_capacity · verify_plan · what_if · fault_impact</text>
+  <text class="mono" x="56" y="344">feeding_path · recommend_plan · execute_plan (only after operator approval) · explain_plan</text>
+
+  <path class="edge" d="M170 210 V258"/>
+  <path class="edge" d="M480 210 V258"/>
+  <path class="edge" d="M790 210 V258"/>
+
+  <!-- Row 4: deterministic pipeline -->
+  <rect class="box core" x="40" y="384" width="640" height="96" rx="10"/>
+  <text class="title" x="56" y="410">FLISR pipeline, deterministic code</text>
+  <text class="text" x="56" y="436">locate → isolate → plan candidates → verify each on a fork → execute → explain</text>
+  <text class="small" x="56" y="460">checks: isolation, connectivity, radiality, line capacity, voltage. Only verified plans can run.</text>
+
+  <rect class="box" x="720" y="384" width="200" height="96" rx="10"/>
+  <text class="title" x="736" y="410">pandapower</text>
+  <text class="small" x="736" y="432">power flow on each</text>
+  <text class="small" x="736" y="448">forked configuration:</text>
+  <text class="small" x="736" y="464">minimum voltage, loading</text>
+  <path class="edge both" d="M682 432 H718"/>
+
+  <path class="edge" d="M360 354 V382"/>
+
+  <!-- Row 5: FalkorDB -->
+  <rect class="box db" x="40" y="540" width="880" height="134" rx="10"/>
+  <text class="title" x="56" y="566">FalkorDB: the grid's twin and the agent's memory</text>
+  <rect class="sub" x="56" y="580" width="300" height="78" rx="8"/>
+  <text class="mono" x="70" y="602">grid_live</text>
+  <text class="small" x="70" y="622">buses, lines, switches, zones, and the</text>
+  <text class="small" x="70" y="640">decision trace: incident → plans → steps</text>
+  <rect class="sub" x="372" y="580" width="250" height="78" rx="8"/>
+  <text class="mono" x="386" y="602">fork_&lt;plan&gt;, whatif_*</text>
+  <text class="small" x="386" y="622">GRAPH.COPY per plan, checked,</text>
+  <text class="small" x="386" y="640">written back, then deleted</text>
+  <rect class="sub" x="638" y="580" width="266" height="78" rx="8"/>
+  <text class="mono" x="652" y="602">algo.WCC · algo.MSF · algo.maxFlow</text>
+  <text class="small" x="652" y="622">zones, loops, transfer limits; plus</text>
+  <text class="small" x="652" y="640">multi-hop paths for energization</text>
+
+  <path class="edge" d="M360 480 V538"/>
+  <text class="label" x="368" y="506">Cypher and GRAPH.COPY</text>
+  <text class="rule" x="540" y="514">The LLM never writes Cypher or moves a switch.</text>
+</svg>
