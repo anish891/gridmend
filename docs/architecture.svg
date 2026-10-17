@@ -59,7 +59,7 @@
   <!-- Row 3: tools -->
   <rect class="box llm" x="40" y="260" width="880" height="94" rx="10"/>
   <text class="title" x="56" y="287">Agent tools: the LLM's only way to touch the grid</text>
-  <text class="mono" x="56" y="310">operating_context · grid_status · line_dependencies · locate_fault · isolation_plan</text>
+  <text class="mono" x="56" y="310">field_reports · grid_status · line_dependencies · locate_fault · isolation_plan</text>
   <text class="mono" x="56" y="327">restoration_candidates · transfer_capacity · verify_plan · what_if · fault_impact</text>
   <text class="mono" x="56" y="344">feeding_path · recommend_plan · execute_plan (only after operator approval) · explain_plan</text>
 

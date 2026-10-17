@@ -11,9 +11,8 @@ areas, checks every candidate on a forked copy of the graph, and only then lets 
 (or an LLM operator agent) execute a plan. Every decision is written back into the graph, so
 any restoration can be explained afterwards, path by path.
 
-It also acts on what people tell it in plain words. An operator describes the day ("heat
-advisory, the cooling centre is open") and the LLM applies the utility's written restoration
-policy to it. A field crew reports a jammed switch, and GridMend isolates and replans around it.
+It also acts on what people tell it in plain words. A field crew reports a jammed switch, and
+GridMend isolates and replans around it.
 An operator asks "what if 6-7 won't open?" and gets the answer from throwaway copies of the
 graph. The LLM only proposes; deterministic code checks every value before it reaches the graph.
 
@@ -37,8 +36,7 @@ evidence and the tools it used, and highlights the path or lines it relied on on
 
 Use the **network switch** in the top bar to move between the IEEE 33-bus test feeder and a real
 177-bus, two-substation 20 kV network (Oberrhein). Press **Play the demo** for a 30-second guided
-run of a fault, or pick today's
-conditions, then a demo fault (or click any line). **Two faults at once** shows faults on two
+run of a fault, or pick a demo fault (or click any line). **Two faults at once** shows faults on two
 branches found together, and a fault hidden behind another that only shows when the breaker
 recloses onto it. After the main-line fault is restored, **Reconnect the solar plant** brings the
 500 kW plant on the 19-22 lateral back online: its output relieves line 2-19, and a second
@@ -65,9 +63,8 @@ customers near the fault. Operators must then:
 
 without creating loops, overloading lines or letting voltage sag below safe limits. Utilities
 call this FLISR (fault location, isolation and service restoration). It normally lives inside
-expensive distribution-management systems, and its decisions are hard to inspect. The rules
-that decide who gets power first live in policy documents, and the state of the field arrives
-as crew notes, not as clean data.
+expensive distribution-management systems, and its decisions are hard to inspect. The state
+of the field arrives as crew notes, not as clean data.
 
 ## What GridMend does
 
@@ -77,14 +74,14 @@ as crew notes, not as clean data.
 | Isolate | Open the faulted zone's boundary switches, reclose the breaker; a zone tied to the fault by a jammed switch is cut out with it | Switches with exactly one end in the isolated region; traversal across jammed closed switches |
 | Plan | Build candidate restoration plans from the switches that can still operate | What-if energization, radiality and line loading for each tie subset |
 | Verify | Apply each candidate to `GRAPH.COPY` of the live graph and check operability, isolation, connectivity, radiality, capacity and voltage | A fork per plan; power flow on the forked configuration |
-| Decide | Rank verified plans by the total priority of the critical sites they restore (from the policy in force), then load restored, then fewest operations | `RESTORES` edges from each plan to zones, `Priority` weights on buses |
+| Decide | Rank verified plans by the critical sites they restore, then load restored, then fewest operations | `RESTORES` edges from each plan to zones, critical weights on buses |
 | Act | Execute the approved plan on the live graph | Only plans whose status is `verified` |
-| Explain | Feeding path of every restored zone, margins, rejected alternatives, why each critical site is lit or dark, the conditions and crew reports in force, and a numbered switching order | Stored decision trace |
+| Explain | Feeding path of every restored zone, margins, rejected alternatives, why each critical site is lit or dark, the crew reports in force, and a numbered switching order | Stored decision trace |
 
 The LLM never writes Cypher and never flips a switch. As the operator agent it calls fourteen
 tools, chooses among plans that already passed verification, and explains the choice using only
-facts the tools returned. As a reader it turns the written policy and crew notes into structured
-values that code validates before writing. All writes to the graph are deterministic code.
+facts the tools returned. As a reader it turns crew notes into structured values that code
+validates before writing. All writes to the graph are deterministic code.
 
 ### Example: fault on line 4-5 (zone Z3)
 
@@ -100,11 +97,8 @@ values that code validates before writing. All writes to the graph are determini
 * The plan with both critical sites is executed. Water pumping stays dark (no tie reaches a
   live zone) and so does telecom (closing 18-33 from Z14 would overload the path through 2-19).
 
-The same fault under different conditions:
+The same fault with a jammed switch:
 
-* **Heat advisory.** Policy rule 3.1 raises the open cooling centre (bus 11, Z10) from 1 to 10;
-  rule 3.2 lowers the fire station, which has backup generators, from 10 to 6. The plan that
-  restores the hospital and the cooling centre (open 13-14, close 12-22) now ranks first.
 * **Switch 6-7 reported jammed shut.** Isolation cannot open 6-7, so Z7 (the hospital) is cut out
   with the fault and 9-10 opens instead. The ties into Z7 are never planned. The best safe plan
   closes 12-22 and restores the fire station's zone: 615 kW instead of 850, which the what-if
@@ -112,19 +106,14 @@ The same fault under different conditions:
 
 ## What the LLM does, and what it does not
 
-The LLM is the operator's assistant, not the controller. It has three jobs, and each one ends
+The LLM is the operator's assistant, not the controller. It has two jobs, and each one ends
 at a deterministic check.
 
-* **Operator agent.** It decides which tools to call and in what order: the conditions in force,
-  locate, isolate, candidates, which candidates to verify, what-ifs. It chooses among verified
-  plans following the policy and the day's conditions (crew arrival, weather) and justifies the
-  choice citing the policy's rule numbers. `recommend_plan` refuses a plan that did not pass
-  verification, and the choice and reason are written into the decision trace.
-* **Policy reader.** From the operator's description of the day and the written policy
-  ([policy.md](backend/data/policy.md)), it proposes a priority weight for every site with the
-  rule it applied. Code accepts it only if every site is known, every weight is a whole number
-  from 1 to 20 and every entry cites a rule; otherwise nothing changes. Conditions can only
-  change while the feeder is healthy, so an incident is handled under one set of priorities.
+* **Operator agent.** It decides which tools to call and in what order: field reports, locate,
+  isolate, candidates, which candidates to verify, what-ifs. It chooses among verified plans
+  (most critical sites restored, then most load, then fewest switch operations) and justifies
+  the choice. `recommend_plan` refuses a plan that did not pass verification, and the choice
+  and reason are written into the decision trace.
 * **Crew-note reader.** From a crew's free-text note it lists the switches the note says are
   jammed or repaired, with the evidence. Code accepts a finding only if the switch exists, the
   evidence is quoted from the note itself, and any position the note states matches the twin.
@@ -133,7 +122,7 @@ at a deterministic check.
 
 It never writes Cypher, never flips a switch, never decides whether a plan is safe (the fork
 verifier does), and in the web UI it never executes: the operator does. Without an LLM, the same
-pipeline runs with a deterministic ranking on standing priorities, which is what the evaluation's
+pipeline runs with the same ranking done deterministically, which is what the evaluation's
 `gridmend` row uses. The evaluation's `llm-only` row shows what happens when a model plans
 without the graph and the verifier: 20 of 23 plans unsafe.
 
@@ -161,8 +150,8 @@ Remove FalkorDB and nothing is left: no twin, no forks, no paths, no trace.
 * **Safety** comes from a forked graph per plan (`GRAPH.COPY`), checked before any switch moves.
   A what-if forks the whole grid twice, with and without the jam, and plans on both.
 * **Explainability** comes from the decision trace stored next to the grid: incidents, plans,
-  switch operations, violations, the zones each plan restores, the conditions and priorities an
-  incident was handled under, and the crew reports it took into account.
+  switch operations, violations, the zones each plan restores, and the crew reports an incident
+  took into account.
 
 ## Graph data model
 
@@ -180,12 +169,9 @@ deleted after a what-if).
 (:Bus)-[:IN_ZONE]->(:Zone)
 (:Zone)-[:BOUNDARY {switch_id, kind}]->(:Zone)                            upstream -> downstream
 
-(:Context {current, conditions, model, ts})-[:SETS]->(:Priority {facility, weight, rule})
-        -[:APPLIES_TO]->(:Bus)
 (:CrewReport {id, note, other, model, ts})-[:FINDS]->(:Finding {switch_id, operable, evidence})
 
 (:Incident {id, ts, fault_line, status})-[:FAULT_IN]->(:Zone)
-(:Incident)-[:UNDER]->(:Context)
 (:Incident)-[:HAS_REPORT]->(:CrewReport)
 (:Incident)-[:CUTS_OFF {via}]->(:Zone)                    healthy zone isolated with the fault
 (:Incident)-[:HAS_PLAN]->(:Plan {id, kind, status, switch_ops, restored_kw, restored_weighted,
@@ -341,7 +327,7 @@ ORDER BY length(p) LIMIT 1
 ## Evaluation
 
 All 23 single faults on unswitched segments of the IEEE 33-bus feeder, five methods
-(`gridmend eval --llm-only`), on a normal day with standing priorities:
+(`gridmend eval --llm-only`):
 
 | method | restored kW | % of optimal | critical loads | switch ops | violations | unsafe plans | mean planning ms |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -411,7 +397,7 @@ Where each part lives:
 ```
 gridmend.grid   load, zones, energization (case data -> graph)
 gridmend.flisr  locate, isolate, candidates, verify (+ pandapower), execute, explain, trace,
-                transfer (max flow), policy, crew reports, what-if
+                transfer (max flow), crew reports, what-if
 gridmend.agent  14 tools --+-- LLM operator loop and Ask the grid (any OpenAI-compatible endpoint)
                            +-- MCP server (stdio)
 gridmend.api    HTTP API --+-- Next.js + Cytoscape UI
@@ -454,8 +440,6 @@ Other commands: `basecase`, `zones`, `status`, `switch <id> open|close`, `fault 
 `eval --llm-only`, `serve --ui <dir>`, and with an LLM configured:
 
 ```bash
-gridmend context "Heat advisory declared: 44 C, the cooling centre on bus 11 is open"
-gridmend context --clear                   # back to standing priorities
 gridmend crew "Patrol: the sectionalizer between 6 and 7 is jammed shut"
 gridmend crew                              # reports filed and switches jammed now
 ```
@@ -475,16 +459,15 @@ Then:
 
 * `gridmend agent 4-5` lets the agent work the incident through the tools and asks for your
   approval before it executes a plan.
-* In the web UI, the top of the Feeder page offers **Today's conditions** (normal day, heat
-  advisory, storm warning, or your own description) and **Rules / AI operator agent**. In agent
-  mode the agent reads the conditions, locates, isolates, asks for candidates, verifies each on a
+* In the web UI, the top of the Feeder page offers **Rules / AI operator agent**. In agent
+  mode the agent reads the field reports, locates, isolates, asks for candidates, verifies each on a
   fork and calls `recommend_plan`, while every tool call streams into an agent log and replays on
   the diagram. It never gets the execute tool: its pick and its reason are stored on the Plan
   node, and you approve and execute with the usual button. One model call at a time across all
   visitors, with `AGENT_COOLDOWN_S` (default 30) between agent runs.
 * The **Field crew report** panel files a crew's note at any time. Before a fault it shapes
   isolation; during an incident it rejects the plans that need a jammed switch and replans.
-* Without an LLM configured, the conditions, crew report and agent controls are hidden. The
+* Without an LLM configured, the crew report and agent controls are hidden. The
   what-if and everything else work without one.
 
 ### MCP
@@ -522,7 +505,7 @@ approval of `execute_plan`.
 
 | Tool | Returns |
 |---|---|
-| `operating_context` | conditions in force, every site's priority with its policy rule, the policy, crew reports and jammed switches |
+| `field_reports` | field crew reports and the switches they found jammed |
 | `grid_status` | energized and dark zones, switch states (including jammed), load served |
 | `line_dependencies` | per line: buses, load and critical facilities downstream |
 | `locate_fault` | faulted zone and indicator evidence chain |
@@ -535,7 +518,7 @@ approval of `execute_plan`.
 | `execute_plan` | applies a verified plan |
 | `fault_impact` | what a fault on a segment would cost (load left dark, critical sites lost), or every segment ranked |
 | `feeding_path` | the switches power crosses from the substation to a bus or named facility, right now |
-| `explain_plan` | feeding paths, margins, rejected alternatives, critical sites, conditions, crew reports, switching order |
+| `explain_plan` | feeding paths, margins, rejected alternatives, critical sites, crew reports, switching order |
 
 ### Single container
 
@@ -577,11 +560,7 @@ Leave them unset and the site runs rule-based only.
 * Synthetic operating assumptions in
   [assumptions.yaml](backend/data/assumptions.yaml): breaker 1-2, eight sectionalizers with
   fault indicators, four critical sites (hospital, fire station, water pumping, telecom; weight
-  10), a cooling centre on bus 11 that is ordinary load (weight 1) on a normal day, line ratings
-  of 5000 kVA on the main feeder and 1400 kVA on laterals and ties, and a 0.90 pu voltage limit.
-* Synthetic restoration policy in [policy.md](backend/data/policy.md): standing priorities,
-  conditions that change them (heat advisory, storm warning, water emergency), and rules for
-  choosing between safe plans (crew arrival, forecast storms).
+  10), line ratings of 5000 kVA on the main feeder and 1400 kVA on laterals and ties, and a 0.90 pu voltage limit.
 
 ## Limitations
 
@@ -591,8 +570,7 @@ covers single faults. No protection coordination, transients, unbalanced three-p
 real SCADA or time-varying load. Distributed generation is one solar plant at unity power
 factor that trips when its bus loses power and reconnects on command (standing in for the
 reconnection delay); there is no islanding, no volt/var control and no solar variability. Crew reports only mark switches jammed or repaired: there is no crew dispatch or repair
-timing, and a jammed switch is assumed stuck in the position the twin shows. Priorities change
-only between incidents. Line loading is checked on summed load kVA; voltage is checked with a
+timing, and a jammed switch is assumed stuck in the position the twin shows. Line loading is checked on summed load kVA; voltage is checked with a
 balanced power flow.
 
 ## Research basis
