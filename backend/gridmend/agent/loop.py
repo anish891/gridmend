@@ -2,6 +2,7 @@ import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from gridmend.agent.llm import strip_reasoning
 from gridmend.agent.tools import GridTools
 
 if TYPE_CHECKING:
@@ -106,7 +107,7 @@ def run_agent(
         message = reply.choices[0].message
         messages.append(message.model_dump(exclude_none=True))
         if not message.tool_calls:
-            return message.content or ""
+            return strip_reasoning(message.content)
 
         for call in message.tool_calls:
             try:

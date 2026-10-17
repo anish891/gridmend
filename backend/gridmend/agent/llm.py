@@ -12,10 +12,15 @@ def make_client(settings: Settings | None = None) -> tuple[OpenAI, str]:
     return client, settings.llm_model
 
 
+def strip_reasoning(text: str | None) -> str:
+    # Qwen-style models wrap their thinking in <think>, gpt-oss on Bedrock in <reasoning>.
+    return re.sub(r"<(think|reasoning)>.*?</\1>", "", text or "", flags=re.DOTALL).strip()
+
+
 def parse_json_object(text: str) -> dict:
     """Pull the first JSON object out of a reply, tolerating prose, code fences or a
-    <think> block around it."""
-    text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL)
+    reasoning block around it."""
+    text = strip_reasoning(text)
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
         raise ValueError("no JSON object in reply")
