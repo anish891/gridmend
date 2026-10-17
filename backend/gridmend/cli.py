@@ -105,14 +105,14 @@ def cmd_switch(args: argparse.Namespace) -> int:
 
 def cmd_fault(args: argparse.Namespace) -> int:
     from gridmend.grid.load import LIVE_GRAPH
-    from gridmend.sim import FaultError, apply_fault
+    from gridmend.sim import FaultError, apply_faults
 
     try:
-        path = apply_fault(db.connect().select_graph(LIVE_GRAPH), args.line)
+        path = apply_faults(db.connect().select_graph(LIVE_GRAPH), args.lines)
     except FaultError as exc:
         print(exc, file=sys.stderr)
         return 1
-    print(f"fault on {args.line}; breaker tripped")
+    print(f"fault on {', '.join(args.lines)}; breaker tripped")
     print(f"indicators set: {', '.join(path)}")
     return cmd_status(args)
 
@@ -126,26 +126,25 @@ def cmd_locate(args: argparse.Namespace) -> int:
     except LocateError as exc:
         print(exc, file=sys.stderr)
         return 1
-    print(f"faulted zone: Z{location.zone}")
-    print(f"evidence:     {' -> '.join(location.chain)} (all set; downstream clear)")
+    for zone in location.zones:
+        print(f"faulted zone: Z{zone}")
+        print(f"evidence:     {' -> '.join(location.chains[zone])} (all set; downstream clear)")
     return 0
 
 
 def cmd_isolate(args: argparse.Namespace) -> int:
-    from gridmend.flisr.isolate import IsolateError, faulted_zone, isolate
-    from gridmend.flisr.locate import LocateError, locate_fault
+    from gridmend.flisr.isolate import IsolateError, faulted_zones, secure
+    from gridmend.flisr.locate import LocateError
     from gridmend.flisr.trace import incident_trace
     from gridmend.grid.load import LIVE_GRAPH
 
     g = db.connect().select_graph(LIVE_GRAPH)
     try:
-        if faulted_zone(g) is None:
-            locate_fault(g)
-        incident_id, ops = isolate(g)
+        incident_id, ops = secure(g)
     except (LocateError, IsolateError) as exc:
         print(exc, file=sys.stderr)
         return 1
-    print(f"incident {incident_id}: isolated Z{faulted_zone(g)}")
+    print(f"incident {incident_id}: isolated {', '.join(f'Z{z}' for z in faulted_zones(g))}")
     for i, op in enumerate(ops, 1):
         print(f"  {i}. {op.op} {op.switch_id}")
     for plan in incident_trace(g, incident_id):
@@ -226,7 +225,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 
 def print_explanation(e: dict) -> None:
-    print(f"incident {e['incident']}: fault on {e['fault_line']} in Z{e['faulted_zone']} "
+    print(f"incident {e['incident']}: fault on {e['fault_line']} in "
+          f"{', '.join(f'Z{z}' for z in e['faulted_zones'])} "
           f"({e['status']})")
     print(f"isolation: {', '.join(e['isolation'])}")
     plan = e["plan"]
@@ -261,19 +261,28 @@ def cmd_run(args: argparse.Namespace) -> int:
     from gridmend.flisr.explain import explain_incident
     from gridmend.flisr.isolate import isolate
     from gridmend.flisr.locate import locate_fault
+    from gridmend.flisr.trace import open_incident
     from gridmend.grid.load import LIVE_GRAPH
-    from gridmend.sim import FaultError, apply_fault
+    from gridmend.sim import FaultError, apply_faults
 
     conn = db.connect()
     g = conn.select_graph(LIVE_GRAPH)
     try:
-        apply_fault(g, args.line)
+        apply_faults(g, args.lines)
     except FaultError as exc:
         print(exc, file=sys.stderr)
         return 1
-    location = locate_fault(g)
-    print(f"located Z{location.zone} from indicators {' -> '.join(location.chain)}")
-    incident_id, _ = isolate(g)
+    # Each round isolates the faults the indicators can see; reclosing onto a hidden one trips
+    # the breaker again and starts the next round.
+    while True:
+        location = locate_fault(g)
+        for zone in location.zones:
+            print(f"located Z{zone} from indicators {' -> '.join(location.chains[zone])}")
+        incident_id, ops = isolate(g)
+        print(f"isolated: {', '.join(f'{o.op} {o.switch_id}' for o in ops)}")
+        if open_incident(g)["status"] != "tripped":
+            break
+        print("the breaker tripped again: another fault was hidden upstream")
 
     def approve(plan: dict) -> bool:
         critical = ", ".join(plan["critical"]) or "no critical loads"
@@ -505,8 +514,8 @@ def build_parser() -> argparse.ArgumentParser:
     switch.add_argument("action", choices=["open", "close"])
     switch.set_defaults(func=cmd_switch)
 
-    fault = sub.add_parser("fault", help="simulate a fault on an unswitched segment")
-    fault.add_argument("line")
+    fault = sub.add_parser("fault", help="simulate faults on one or more unswitched segments")
+    fault.add_argument("lines", nargs="+", metavar="line")
     fault.set_defaults(func=cmd_fault)
 
     sub.add_parser("reset", help="restore grid_live from grid_base").set_defaults(func=cmd_reset)
@@ -543,8 +552,8 @@ def build_parser() -> argparse.ArgumentParser:
         func=cmd_plan
     )
 
-    run = sub.add_parser("run", help="fault a line and run the full FLISR loop")
-    run.add_argument("line")
+    run = sub.add_parser("run", help="fault one or more lines and run the full FLISR loop")
+    run.add_argument("lines", nargs="+", metavar="line")
     run.add_argument("--auto", action="store_true", help="execute the best plan without asking")
     run.set_defaults(func=cmd_run)
 

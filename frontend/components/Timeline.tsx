@@ -3,7 +3,8 @@ import type { Location, Trace } from "@/lib/api";
 
 type Props = {
   fault: string | null;
-  location: Location | null;
+  // One entry per round of location; a second round means a fault was hidden upstream.
+  locations: Location[];
   trace: Trace | null;
   conditions: string | null;
 };
@@ -16,7 +17,7 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "failed safety checks",
 };
 
-export default function Timeline({ fault, location, trace, conditions }: Props) {
+export default function Timeline({ fault, locations, trace, conditions }: Props) {
   return (
     <Card as="aside" className="timeline" title="Decision trace" hint={trace?.incident.id}>
       <ol>
@@ -32,12 +33,15 @@ export default function Timeline({ fault, location, trace, conditions }: Props) 
             <div className="muted">substation breaker 1-2 tripped</div>
           </li>
         )}
-        {location && (
-          <li className="event">
-            <b>Found it in Z{location.zone}</b>
-            <div className="muted">tripped indicators {location.chain.join(" → ")}</div>
+        {locations.map((location, round) => (
+          <li key={round} className="event">
+            {round > 0 && <div className="small muted">Breaker tripped again on reclosing</div>}
+            <b>Found {location.zones.length > 1 ? "faults" : "it"} in {location.zones.map((z) => `Z${z}`).join(" and ")}</b>
+            {location.zones.map((z) => (
+              <div key={z} className="muted">tripped indicators {location.chains[z].join(" → ")}</div>
+            ))}
           </li>
-        )}
+        ))}
         {trace?.plans.map((p) => (
           <li key={p.plan} className={`event ${p.status}`}>
             <b>{p.plan}</b>

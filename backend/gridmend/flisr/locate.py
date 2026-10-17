@@ -2,6 +2,8 @@ from dataclasses import dataclass
 
 from falkordb import Graph
 
+from gridmend.flisr.trace import add_fault_zones, open_incident, set_incident_status
+
 
 class LocateError(Exception):
     pass
@@ -9,8 +11,17 @@ class LocateError(Exception):
 
 @dataclass(frozen=True)
 class Location:
-    zone: int
-    chain: list[str]
+    # One zone per fault the indicators can see, each with its chain of tripped indicators.
+    zones: list[int]
+    chains: dict[int, list[str]]
+
+    @property
+    def zone(self) -> int:
+        return self.zones[0]
+
+    @property
+    def chain(self) -> list[str]:
+        return self.chains[self.zones[0]]
 
 
 LOCATE_QUERY = """
@@ -24,13 +35,15 @@ RETURN z.id AS faulted_zone
 """
 
 
-def find_faulted_zone(g: Graph) -> int:
-    # The fault sits in the zone whose upstream indicator is set while every
-    # downstream indicator is clear: current reached the zone but went no further.
+def find_faulted_zones(g: Graph) -> list[int]:
+    # A fault sits in a zone whose upstream indicator is set while every downstream indicator
+    # is clear: current reached the zone but went no further. Faults on separate branches each
+    # end their own chain; a fault upstream of another on the same path stays hidden until the
+    # downstream one is cut out and the breaker recloses onto it.
     rows = g.ro_query(LOCATE_QUERY).result_set
-    if len(rows) != 1:
-        raise LocateError(f"expected one faulted zone, indicators point to {len(rows)}")
-    return rows[0][0]
+    if not rows:
+        raise LocateError("no chain of tripped indicators to follow")
+    return sorted(row[0] for row in rows)
 
 
 def indicator_chain(g: Graph, zone: int) -> list[str]:
@@ -54,7 +67,12 @@ def indicator_chain(g: Graph, zone: int) -> list[str]:
 
 
 def locate_fault(g: Graph) -> Location:
-    zone = find_faulted_zone(g)
-    chain = indicator_chain(g, zone)
-    g.query("MATCH (z:Zone) SET z.faulted = (z.id = $zone)", {"zone": zone})
-    return Location(zone=zone, chain=chain)
+    zones = find_faulted_zones(g)
+    chains = {zone: indicator_chain(g, zone) for zone in zones}
+    # Zones found in an earlier round stay faulted.
+    g.query("MATCH (z:Zone) SET z.faulted = z.faulted OR z.id IN $zones", {"zones": zones})
+    incident = open_incident(g)
+    if incident and incident["status"] == "tripped":
+        add_fault_zones(g, incident["id"], zones)
+        set_incident_status(g, incident["id"], "located")
+    return Location(zones=zones, chains=chains)

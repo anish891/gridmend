@@ -8,8 +8,7 @@ from falkordb import FalkorDB, Graph
 
 from gridmend.flisr.candidates import cached_screen, greedy_candidate, read_situation, save_screens
 from gridmend.flisr.execute import restore
-from gridmend.flisr.isolate import isolate
-from gridmend.flisr.locate import locate_fault
+from gridmend.flisr.isolate import secure
 from gridmend.flisr.trace import SwitchOp
 from gridmend.flisr.verify import verify_plan
 from gridmend.grid.case33 import save_voltages
@@ -48,8 +47,7 @@ def isolated_graph(db: FalkorDB, line: str) -> tuple[Graph, str]:
         db.select_graph(EVAL_GRAPH).delete()
     g = db.select_graph(BASE_GRAPH).copy(EVAL_GRAPH)
     apply_fault(g, line)
-    locate_fault(g)
-    incident_id, _ = isolate(g)
+    incident_id, _ = secure(g)
     return g, incident_id
 
 

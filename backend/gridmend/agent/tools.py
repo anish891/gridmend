@@ -42,13 +42,15 @@ SCHEMAS = [
                                 "policy rule behind it, the full restoration priority policy, "
                                 "and field crew reports with the switches they found jammed."),
     schema("grid_status", "Energized, dark and faulted zones, switch states and load served."),
-    schema("locate_fault", "Find the faulted zone from the fault indicator chain."),
+    schema("locate_fault", "Find the faulted zones from the chains of tripped fault indicators. "
+                           "Faults on separate branches are all found at once."),
     schema("line_dependencies", "For each energized line, the buses, load (kW) and critical "
                                 "facilities that depend on it in the current switching, "
                                 "heaviest first.",
            {"top": {"type": "integer", "description": "how many lines to return (default 8)"}}),
-    schema("isolation_plan", "Open the faulted zone's boundary switches and reclose the breaker. "
-                             "Returns the switch operations performed."),
+    schema("isolation_plan", "Open the faulted zones' boundary switches and reclose the breaker. "
+                             "Returns the switch operations performed. If the breaker trips "
+                             "again, a fault was hidden upstream: locate and isolate again."),
     schema("restoration_candidates", "Ranked candidate restoration plans built from graph searches "
                                      "between dead and live zones. Not yet verified."),
     schema("transfer_capacity", "Max-flow bound on the healthy load (kVA) the feeder could carry "
@@ -157,7 +159,9 @@ class GridTools:
 
     def locate_fault(self) -> dict:
         location = locate_fault(self.g)
-        return {"faulted_zone": location.zone, "indicator_chain": location.chain}
+        return {"faulted_zone": location.zone, "indicator_chain": location.chain,
+                "faulted_zones": location.zones,
+                "indicator_chains": {f"Z{z}": chain for z, chain in location.chains.items()}}
 
     def isolation_plan(self) -> dict:
         incident_id, ops = isolate(self.g)
@@ -165,8 +169,13 @@ class GridTools:
             "MATCH (:Incident {id: $id})-[c:CUTS_OFF]->(z:Zone) RETURN z.id, c.via ORDER BY z.id",
             {"id": incident_id},
         ).result_set
-        return {"incident": incident_id, "executed": [f"{o.op} {o.switch_id}" for o in ops],
-                "cut_off_with_fault": [{"zone": z, "jammed_switch": via} for z, via in cut_off]}
+        result = {"incident": incident_id, "executed": [f"{o.op} {o.switch_id}" for o in ops],
+                  "cut_off_with_fault": [{"zone": z, "jammed_switch": via} for z, via in cut_off]}
+        if open_incident(self.g)["status"] == "tripped":
+            result["breaker_tripped_again"] = (
+                "Reclosing fed another fault hidden upstream, so the breaker tripped again. "
+                "Call locate_fault, then isolation_plan, before planning restoration.")
+        return result
 
     def restoration_candidates(self) -> dict:
         self.incident_id()

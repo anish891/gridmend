@@ -52,7 +52,7 @@ export default function StatusStrip({ state, trace }: Props) {
               <Badge tone={STATUS_TONE[state.incident.status] ?? "danger"}>
                 {capitalize(state.incident.status)}
               </Badge>{" "}
-              <span className="muted">in Z{state.incident.zone}</span>
+              <span className="muted">in {state.incident.zones.map((z) => `Z${z}`).join(" and ")}</span>
             </>
           ) : state.lines.some((l) => l.faulted) ? (
             <Badge tone="danger">Breaker tripped</Badge>

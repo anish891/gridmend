@@ -2,6 +2,7 @@ from falkordb import Graph
 
 from gridmend.flisr.candidates import screen
 from gridmend.flisr.crew import crew_reports
+from gridmend.flisr.isolate import isolation_plans
 from gridmend.flisr.policy import incident_context
 from gridmend.flisr.transfer import transfer_limit
 from gridmend.grid.energize import grid_status
@@ -42,7 +43,8 @@ def switching_order(g: Graph, incident_id: str) -> list[dict]:
         """,
         {"id": incident_id},
     ).result_set
-    ordered = sorted(rows, key=lambda r: (r[1] != "isolation", r[2]))
+    # Isolation rounds in order (a hidden fault adds a second), then the restoration.
+    ordered = sorted(rows, key=lambda r: (r[1] != "isolation", r[0], r[2]))
     return [
         {"step": i, "plan": plan_id, "phase": "isolate" if kind == "isolation" else "restore",
          "op": op, "switch_id": switch_id, "switch_kind": switch_kind}
@@ -132,13 +134,14 @@ def why_dark(g: Graph, incident_id: str, zone: int, faulted: bool) -> str:
 
 
 def explain_incident(g: Graph, incident_id: str) -> dict:
-    incident = g.ro_query(
+    rows = g.ro_query(
         """
         MATCH (i:Incident {id: $id})-[:FAULT_IN]->(z:Zone)
-        RETURN i.fault_line, i.status, z.id
+        RETURN i.fault_line, i.status, z.id ORDER BY z.id
         """,
         {"id": incident_id},
-    ).result_set[0]
+    ).result_set
+    incident = rows[0]
     executed = g.ro_query(
         """
         MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {kind: 'restoration', status: 'executed'})
@@ -184,7 +187,9 @@ def explain_incident(g: Graph, incident_id: str) -> dict:
         "fault_line": incident[0],
         "status": incident[1],
         "faulted_zone": incident[2],
-        "isolation": plan_steps(g, f"{incident_id}-iso"),
+        "faulted_zones": [row[2] for row in rows],
+        "isolation": [step for plan_id in isolation_plans(g, incident_id)
+                      for step in plan_steps(g, plan_id)],
         "switching_order": switching_order(g, incident_id),
         "plan": plan,
         "rejected": rejected_plans(g, incident_id),

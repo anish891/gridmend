@@ -29,7 +29,7 @@ from gridmend.grid.case33 import load_voltages
 from gridmend.grid.dependency import line_dependencies
 from gridmend.grid.energize import grid_status
 from gridmend.grid.load import LIVE_GRAPH
-from gridmend.sim import FaultError, apply_fault, reset
+from gridmend.sim import FaultError, apply_faults, reset
 
 # The graph the API serves; tests point it at a scratch copy.
 GRAPH_NAME = LIVE_GRAPH
@@ -62,7 +62,9 @@ app.add_middleware(
 
 
 class FaultRequest(BaseModel):
-    line: str
+    line: str | None = None
+    # Several segments at once, for simultaneous faults.
+    lines: list[str] | None = None
 
 
 class ExecuteRequest(BaseModel):
@@ -145,10 +147,11 @@ def state() -> dict:
 @app.post("/fault")
 def fault(request: FaultRequest) -> dict:
     try:
-        tripped = apply_fault(live(), request.line)
+        lines = request.lines or ([request.line] if request.line else [])
+        tripped = apply_faults(live(), lines)
     except FaultError as exc:
         raise HTTPException(400, str(exc))
-    return {"line": request.line, "indicators_set": tripped}
+    return {"line": lines[0], "lines": lines, "indicators_set": tripped}
 
 
 @app.post("/locate")
@@ -157,16 +160,19 @@ def locate() -> dict:
         location = locate_fault(live())
     except LocateError as exc:
         raise HTTPException(400, str(exc))
-    return {"zone": location.zone, "chain": location.chain}
+    return {"zone": location.zone, "chain": location.chain, "zones": location.zones,
+            "chains": {str(z): chain for z, chain in location.chains.items()}}
 
 
 @app.post("/isolate")
 def isolate_fault() -> dict:
     try:
-        incident_id, ops = isolate(live())
+        g = live()
+        incident_id, ops = isolate(g)
     except IsolateError as exc:
         raise HTTPException(400, str(exc))
-    return {"incident": incident_id, "ops": [{"switch_id": o.switch_id, "op": o.op} for o in ops]}
+    return {"incident": incident_id, "ops": [{"switch_id": o.switch_id, "op": o.op} for o in ops],
+            "tripped_again": open_incident(g)["status"] == "tripped"}
 
 
 @app.post("/plan")

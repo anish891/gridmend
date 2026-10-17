@@ -23,11 +23,18 @@ const DEMO_FAULTS = [
   },
 ];
 
+// Two faults at once: on separate branches both show at once; on one path the downstream fault
+// hides the upstream one until the breaker recloses onto it.
+const DOUBLE_FAULTS = [
+  { lines: ["20-21", "27-28"], title: "Two branches", note: "Both faults are found from one set of indicators." },
+  { lines: ["4-5", "16-17"], title: "One behind the other", note: "The upstream fault hides until the breaker recloses onto it." },
+];
+
 export type Mode = "rules" | "agent";
 
 type Props = {
   disabled: boolean;
-  onFault: (line: string) => void;
+  onFault: (line: string | string[]) => void;
   agentModel: string | null;
   mode: Mode;
   onMode: (mode: Mode) => void;
@@ -78,6 +85,16 @@ export default function FaultPicker(
           <button key={f.line} type="button" className="demo-fault" disabled={disabled} onClick={() => onFault(f.line)}>
             <span className="demo-title">{f.title}</span>
             <span className="demo-line">line {f.line}</span>
+            <span className="demo-note">{f.note}</span>
+          </button>
+        ))}
+      </div>
+      <h3 className="double-title">Or two faults at once</h3>
+      <div className="double-faults">
+        {DOUBLE_FAULTS.map((f) => (
+          <button key={f.title} type="button" className="demo-fault double" disabled={disabled} onClick={() => onFault(f.lines)}>
+            <span className="demo-title">{f.title}</span>
+            <span className="demo-line">lines {f.lines.join(" + ")}</span>
             <span className="demo-note">{f.note}</span>
           </button>
         ))}

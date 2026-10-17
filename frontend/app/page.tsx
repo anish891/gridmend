@@ -54,7 +54,7 @@ export default function Home() {
   const [now, setNow] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [fault, setFault] = useState<string | null>(null);
-  const [location, setLocation] = useState<Location | null>(null);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [executed, setExecuted] = useState<string | null>(null);
@@ -129,14 +129,20 @@ export default function Home() {
     const result = event.result as Record<string, any>;
     if (event.name === "locate_fault") {
       working(STEP.locate, "The agent is following the chain of tripped fault indicators");
-      setLocation({ zone: result.faulted_zone, chain: result.indicator_chain });
-      for (const id of result.indicator_chain) {
+      const chains: Record<string, string[]> = Object.fromEntries(
+        Object.entries(result.indicator_chains as Record<string, string[]>).map(([z, c]) => [z.slice(1), c]));
+      setLocations((rounds) => [...rounds, {
+        zone: result.faulted_zone, chain: result.indicator_chain, zones: result.faulted_zones, chains,
+      }]);
+      for (const id of new Set(Object.values(chains).flat())) {
         flash([id], "fi");
         await pause(600);
       }
       await refresh();
     } else if (event.name === "isolation_plan") {
-      working(STEP.isolate, "The agent isolated the faulted zone");
+      working(STEP.isolate, result.breaker_tripped_again
+        ? "The breaker tripped again on reclosing: the agent is looking for a hidden second fault"
+        : "The agent isolated the faulted zone");
       const ops = (result.executed as string[]).map((step) => {
         const [op, switch_id] = step.split(" ");
         return { op, switch_id } as SwitchOp;
@@ -174,37 +180,44 @@ export default function Home() {
     }
   }, [working, handleAgentEvent]);
 
-  const run = useCallback(async (from: Step, line?: string, as: Mode = mode): Promise<PlanResult | null> => {
+  const run = useCallback(async (from: Step, line?: string | string[], as: Mode = mode): Promise<PlanResult | null> => {
     setError(null);
     try {
-      if (from === "fault" && line) {
-        working(STEP.fault, `Fault on line ${line}: the breaker trips and the feeder goes dark`);
-        await api.fault(line);
-        setFault(line);
+      const lines = typeof line === "string" ? [line] : line ?? [];
+      if (from === "fault" && lines.length) {
+        const named = lines.join(" and ");
+        working(STEP.fault, `Fault on ${lines.length > 1 ? "lines" : "line"} ${named}: the breaker trips and the feeder goes dark`);
+        await api.fault(lines);
+        setFault(named);
         await refresh();
-        flash([line], "fault");
+        flash(lines, "fault");
         await pause(1100);
         if (as === "agent") {
           await runWithAgent();
           return null;
         }
       }
-      if (from !== "plan") {
-        working(STEP.locate, "Following the chain of tripped fault indicators");
+      // Each round isolates the faults the indicators show. If reclosing trips the breaker again,
+      // a fault was hidden upstream of one already found, so locate and isolate once more.
+      for (let round = 0; from !== "plan" && round < 5; round++) {
+        working(STEP.locate, round === 0 ? "Following the chain of tripped fault indicators"
+          : "The breaker tripped again on reclosing: a second fault was hidden upstream. Following the new indicators");
         const found = await api.locate();
-        setLocation(found);
-        for (const id of found.chain) {
+        setLocations((rounds) => [...rounds, found]);
+        for (const id of new Set(Object.values(found.chains).flat())) {
           flash([id], "fi");
           await pause(600);
         }
         await refresh();
         await pause(400);
-        working(STEP.isolate, "Opening the faulted zone's boundary switches and reclosing the breaker");
+        const zones = found.zones.map((z) => `Z${z}`).join(" and ");
+        working(STEP.isolate, `Cutting out ${zones} and reclosing the substation breaker`);
         const isolation = await api.isolate();
         await replay(isolation.ops);
         await refresh();
         setTrace(await api.trace());
         await pause(900);
+        if (!isolation.tripped_again) break;
       }
       working(STEP.verify, "Generating restoration plans and verifying each one on a forked graph");
       const result = await api.plan();
@@ -315,7 +328,7 @@ export default function Home() {
     try {
       await api.reset();
       setFault(null);
-      setLocation(null);
+      setLocations([]);
       setPlan(null);
       setSelected(null);
       setExecuted(null);
@@ -351,8 +364,8 @@ export default function Home() {
   useEffect(() => {
     refresh()
       .then(async (s) => {
-        const faulted = s.lines.find((l) => l.faulted);
-        if (faulted) setFault(faulted.id);
+        const faulted = s.lines.filter((l) => l.faulted).map((l) => l.id);
+        if (faulted.length) setFault(faulted.join(" and "));
         if (s.incident) setTrace(await api.trace());
         if (s.incident?.status === "restored") setExplanation(await api.explain());
       })
@@ -371,7 +384,7 @@ export default function Home() {
     : status === "restored" ? STEP.restored + 1
     : plan ? STEP.approve
     : status === "isolated" ? STEP.verify
-    : location ? STEP.isolate
+    : locations.length ? STEP.isolate
     : STEP.locate;
 
   const message = busy ? busy.message
@@ -518,7 +531,7 @@ export default function Home() {
         {healthy ? (
           <Intro />
         ) : (
-          <Timeline fault={fault} location={location} trace={trace} conditions={context?.conditions ?? null} />
+          <Timeline fault={fault} locations={locations} trace={trace} conditions={context?.conditions ?? null} />
         )}
       </div>
 

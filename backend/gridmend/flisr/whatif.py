@@ -5,8 +5,7 @@ from falkordb import FalkorDB, Graph
 from gridmend.flisr.candidates import plan_restoration
 from gridmend.flisr.execute import verified_plans
 from gridmend.flisr.explain import plan_steps
-from gridmend.flisr.isolate import faulted_zone, isolate
-from gridmend.flisr.locate import locate_fault
+from gridmend.flisr.isolate import isolation_plans, secure
 from gridmend.flisr.trace import open_incident
 from gridmend.sim import apply_fault
 
@@ -19,7 +18,7 @@ def to_planning(fork: Graph, fault_line: str | None) -> str:
     """Bring a copy of the grid to the point where restoration is planned; returns the incident."""
     incident = open_incident(fork)
     faulted = fork.ro_query("MATCH ()-[s:SEG {faulted: true}]->() RETURN count(s)").result_set[0][0]
-    if incident and incident["status"] not in ("located", "isolated"):
+    if incident and incident["status"] not in ("located", "tripped", "isolated"):
         raise WhatIfError(f"{incident['id']} is already {incident['status']}")
     if not faulted:
         if not fault_line:
@@ -29,9 +28,7 @@ def to_planning(fork: Graph, fault_line: str | None) -> str:
         raise WhatIfError("a fault is already active: leave the line out")
     if incident and incident["status"] == "isolated":
         return incident["id"]
-    if faulted_zone(fork) is None:
-        locate_fault(fork)
-    incident_id, _ = isolate(fork)
+    incident_id, _ = secure(fork)
     return incident_id
 
 
@@ -49,7 +46,8 @@ def outcome(db: FalkorDB, fork: Graph, incident_id: str) -> dict:
         {"id": incident_id},
     ).result_set
     return {
-        "isolation": plan_steps(fork, f"{incident_id}-iso"),
+        "isolation": [step for plan_id in isolation_plans(fork, incident_id)
+                      for step in plan_steps(fork, plan_id)],
         "cut_off": [{"zone": zone, "via": via} for zone, via in cut_off],
         "plans_checked": len(results),
         "plans_passed": sum(r.passed for _, r in results),

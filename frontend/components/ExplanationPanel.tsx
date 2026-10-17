@@ -10,7 +10,7 @@ const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1
 
 function orderText(e: Explanation): string {
   return [
-    `Switching order, incident ${e.incident}: fault on line ${e.fault_line} in Z${e.faulted_zone}`,
+    `Switching order, incident ${e.incident}: fault on ${e.fault_line} in ${e.faulted_zones.map((z) => `Z${z}`).join(", ")}`,
     ...e.switching_order.map((s) => `${s.step}. ${capitalize(s.op)} ${s.switch_kind} ${s.switch_id}`
       + ` (${s.phase === "isolate" ? "isolation" : `restoration, ${s.plan}`})`),
   ].join("\n");
@@ -66,8 +66,9 @@ export default function ExplanationPanel({ e, onPath = () => {} }: Props) {
         <div>
           <h3>What happened</h3>
           <p>
-            A fault on line <b>{e.fault_line}</b> was located in <b>Z{e.faulted_zone}</b> and isolated by{" "}
-            {e.isolation.join(", ")}.
+            {e.faulted_zones.length > 1 ? "Faults on lines " : "A fault on line "}<b>{e.fault_line}</b>{" "}
+            {e.faulted_zones.length > 1 ? "were" : "was"} located in{" "}
+            <b>{e.faulted_zones.map((z) => `Z${z}`).join(" and ")}</b> and isolated by {e.isolation.join(", ")}.
           </p>
           {e.cut_off.map((c) => (
             <p key={c.zone} className="callout warn">

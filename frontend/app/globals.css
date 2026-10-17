@@ -712,6 +712,16 @@ a.step-label:hover { text-decoration-color: currentColor; }
 .stepper,
 .card { scroll-margin-top: 12px; }
 
+.double-title { margin: var(--space-4) 0 var(--space-2); }
+
+.double-faults {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+
+.state-pill.tripped { background: var(--faulted-soft); color: var(--faulted); }
+
 .hero-stats {
   display: flex;
   flex-wrap: wrap;

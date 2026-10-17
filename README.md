@@ -36,7 +36,9 @@ evidence and the tools it used, and highlights the path or lines it relied on on
   planned and verified in a few seconds; the LLM agent mode takes about a minute.
 
 Press **Play the demo** for a 30-second guided run of the main-line fault, or pick today's
-conditions, then a demo fault (or click any line). Watch the indicators, isolation
+conditions, then a demo fault (or click any line). **Two faults at once** shows faults on two
+branches found together, and a fault hidden behind another that only shows when the breaker
+recloses onto it. Watch the indicators, isolation
 and switching replay on the map, select a plan to see it (or why it failed) on the map, and
 approve one that passed. File a crew note such as "the sectionalizer between 6 and 7 is jammed
 shut" and fault 4-5 again to see the hospital's zone cut out with the fault. Ask **What if a
@@ -396,8 +398,10 @@ gridmend ping                              # OK
 gridmend load                              # writes grid_base and grid_live
 gridmend run 4-5 --auto                    # fault -> locate -> isolate -> plan -> execute -> explain
 gridmend reset
+gridmend run 4-5 16-17 --auto              # two faults: the upstream one shows only on reclosing
+gridmend reset
 gridmend whatif 6-7 --fault 4-5            # what a jammed 6-7 would cost, on copies of the grid
-pytest                                     # 138 tests, on scratch graphs
+pytest                                     # 142 tests, on scratch graphs
 gridmend eval                              # writes backend/eval/out/results.{csv,md}
 gridmend api                               # HTTP API on :8000
 
@@ -406,7 +410,7 @@ npm install
 npm run dev                                # UI on http://localhost:3001
 ```
 
-Other commands: `basecase`, `zones`, `status`, `switch <id> open|close`, `fault <line>`,
+Other commands: `basecase`, `zones`, `status`, `switch <id> open|close`, `fault <line> [<line> ...]`,
 `locate`, `isolate`, `verify --close a,b --open c`, `plan`, `agent <line> [--auto]`, `mcp`,
 `eval --llm-only`, `serve --ui <dir>`, and with an LLM configured:
 
@@ -542,9 +546,10 @@ Leave them unset and the site runs rule-based only.
 
 ## Limitations
 
-Single faults on unswitched segments only. No protection coordination, transients, unbalanced
-three-phase modelling, distributed generation, real SCADA, time-varying load or simultaneous
-faults. Crew reports only mark switches jammed or repaired: there is no crew dispatch or repair
+Faults on unswitched segments only. Simultaneous faults are located and isolated (including a
+fault hidden upstream of another, found when the breaker recloses onto it), but the evaluation
+covers single faults. No protection coordination, transients, unbalanced three-phase modelling,
+distributed generation, real SCADA or time-varying load. Crew reports only mark switches jammed or repaired: there is no crew dispatch or repair
 timing, and a jammed switch is assumed stuck in the position the twin shows. Priorities change
 only between incidents. Line loading is checked on summed load kVA; voltage is checked with a
 balanced power flow.

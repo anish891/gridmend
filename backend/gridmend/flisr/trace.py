@@ -15,28 +15,29 @@ def open_incident(g: Graph) -> dict | None:
         """
         MATCH (i:Incident)-[:FAULT_IN]->(z:Zone)
         WHERE i.status <> 'closed'
-        RETURN i.id, i.status, z.id
+        WITH i, collect(z.id) AS zones
+        RETURN i.id, i.status, zones
         """
     ).result_set
     if not rows:
         return None
-    incident_id, status, zone = rows[0]
-    return {"id": incident_id, "status": status, "zone": zone}
+    incident_id, status, zones = rows[0]
+    zones = sorted(zones)
+    return {"id": incident_id, "status": status, "zone": zones[0], "zones": zones}
 
 
-def record_incident(g: Graph, zone: int) -> str:
+def record_incident(g: Graph, zones: list[int]) -> str:
     count = g.ro_query("MATCH (i:Incident) RETURN count(i)").result_set[0][0]
     incident_id = f"inc{count + 1}"
-    # The simulator knows which segment it faulted; the agent only ever sees the zone.
+    # The simulator knows which segments it faulted; the agent only ever sees the zones.
+    lines = sorted(row[0] for row in g.ro_query(
+        "MATCH ()-[s:SEG {faulted: true}]->() RETURN s.id"
+    ).result_set)
     g.query(
-        """
-        MATCH (z:Zone {id: $zone})
-        OPTIONAL MATCH ()-[s:SEG {faulted: true}]->()
-        CREATE (i:Incident {id: $id, ts: $ts, fault_line: s.id, status: 'located'})
-        CREATE (i)-[:FAULT_IN]->(z)
-        """,
-        {"id": incident_id, "zone": zone, "ts": datetime.now(timezone.utc).isoformat()},
+        "CREATE (:Incident {id: $id, ts: $ts, fault_line: $lines, status: 'located'})",
+        {"id": incident_id, "lines": ", ".join(lines), "ts": datetime.now(timezone.utc).isoformat()},
     )
+    add_fault_zones(g, incident_id, zones)
     # The incident is handled under the operating conditions in force when it was found.
     g.query(
         """
@@ -55,6 +56,17 @@ def record_incident(g: Graph, zone: int) -> str:
         {"id": incident_id},
     )
     return incident_id
+
+
+def add_fault_zones(g: Graph, incident_id: str, zones: list[int]) -> None:
+    g.query(
+        """
+        UNWIND $zones AS zone
+        MATCH (i:Incident {id: $id}), (z:Zone {id: zone})
+        MERGE (i)-[:FAULT_IN]->(z)
+        """,
+        {"id": incident_id, "zones": zones},
+    )
 
 
 def set_incident_status(g: Graph, incident_id: str, status: str) -> None:

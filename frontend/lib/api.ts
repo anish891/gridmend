@@ -78,7 +78,7 @@ export type SwitchingStep = {
 
 export type CrewFiling = { report: string; findings: CrewFinding[]; other: string; rejected_plans: string[] };
 
-export type Incident = { id: string; status: string; zone: number } | null;
+export type Incident = { id: string; status: string; zone: number; zones: number[] } | null;
 
 export type GridState = {
   buses: Bus[];
@@ -111,7 +111,8 @@ export type Candidate = {
 
 export type PlanResult = { incident: string; recommended: string | null; candidates: Candidate[] };
 
-export type Location = { zone: number; chain: string[] };
+// One round of fault location: every faulted zone the indicators point to, with its chain.
+export type Location = { zone: number; chain: string[]; zones: number[]; chains: Record<string, string[]> };
 
 export type CriticalLoad = {
   bus: number;
@@ -126,6 +127,7 @@ export type Explanation = {
   fault_line: string;
   status: string;
   faulted_zone: number;
+  faulted_zones: number[];
   isolation: string[];
   switching_order: SwitchingStep[];
   plan: {
@@ -250,9 +252,10 @@ async function call<T>(method: "GET" | "POST" | "DELETE", path: string, body?: u
 
 export const api = {
   state: () => call<GridState>("GET", "/state"),
-  fault: (line: string) => call<{ line: string; indicators_set: string[] }>("POST", "/fault", { line }),
+  fault: (lines: string[]) => call<{ lines: string[]; indicators_set: string[] }>("POST", "/fault", { lines }),
   locate: () => call<Location>("POST", "/locate"),
-  isolate: () => call<{ incident: string; ops: SwitchOp[] }>("POST", "/isolate"),
+  // tripped_again: reclosing fed a fault hidden upstream, so it must be located and isolated too.
+  isolate: () => call<{ incident: string; ops: SwitchOp[]; tripped_again: boolean }>("POST", "/isolate"),
   plan: () => call<PlanResult>("POST", "/plan"),
   execute: (planId: string) => call<{ plan_id: string; ops: SwitchOp[] }>("POST", "/execute", { plan_id: planId }),
   explain: () => call<Explanation>("GET", "/explain"),

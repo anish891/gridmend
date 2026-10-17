@@ -28,7 +28,8 @@ def test_state_has_buses_switches_and_zones(client):
 
 def test_fault_to_restore_flow(client):
     assert client.post("/fault", json={"line": "4-5"}).json()["indicators_set"] == ["1-2", "2-3"]
-    assert client.post("/locate").json() == {"zone": 3, "chain": ["1-2", "2-3"]}
+    assert client.post("/locate").json() == {"zone": 3, "chain": ["1-2", "2-3"], "zones": [3],
+                                             "chains": {"3": ["1-2", "2-3"]}}
     assert len(client.post("/isolate").json()["ops"]) == 5
 
     plan = client.post("/plan").json()

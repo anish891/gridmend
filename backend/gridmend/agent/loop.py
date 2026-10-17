@@ -12,7 +12,8 @@ breaker has tripped. Restore service safely using only your tools; the grid twin
 graph database and every switching action goes through deterministic, verified code.
 
 Work in this order:
-1. operating_context, grid_status, then locate_fault, then isolation_plan.
+1. operating_context, grid_status, then locate_fault, then isolation_plan. If the breaker trips
+   again, locate_fault and isolation_plan once more: a second fault was hidden upstream.
 2. restoration_candidates, then verify_plan for each candidate worth considering (by rank).
    transfer_capacity tells you how much load any plan could restore at most and which lines
    limit it.
@@ -41,7 +42,8 @@ database and every action goes through deterministic, verified code. You advise;
 approves and executes.
 
 Work in this order:
-1. operating_context, then locate_fault, then isolation_plan.
+1. operating_context, then locate_fault, then isolation_plan. If the breaker trips again,
+   locate_fault and isolation_plan once more: a second fault was hidden upstream.
 2. restoration_candidates, then verify_plan for each candidate (by rank).
    transfer_capacity tells you how much load any plan could restore at most and which lines
    limit it.

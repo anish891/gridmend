@@ -7,7 +7,7 @@ from falkordb import Graph
 
 from gridmend.flisr.candidates import TIE_FEEDS_QUERY
 from gridmend.flisr.explain import FEEDING_PATH_QUERY
-from gridmend.flisr.isolate import BOUNDARY_QUERY, faulted_zone, isolation_region
+from gridmend.flisr.isolate import BOUNDARY_QUERY, faulted_zones, isolation_region
 from gridmend.flisr.locate import LOCATE_QUERY
 from gridmend.flisr.trace import TRACE_QUERY, open_incident
 from gridmend.flisr.transfer import TRANSFER_QUERY, build_flow_network
@@ -109,10 +109,11 @@ def run_on_fork(g: Graph, setup, query: str):
 
 def run_steps(g: Graph) -> list[dict]:
     incident = open_incident(g)
-    zone = faulted_zone(g)
+    zones = faulted_zones(g)
+    region = {z for zone in zones for z in isolation_region(g, zone)}
     available = {
         None: {},
-        "region": {"zones": sorted(isolation_region(g, zone)) if zone is not None else None},
+        "region": {"zones": sorted(region) if zones else None},
         "path_zone": {"zone": path_zone(g)},
         "incident": {"id": incident["id"] if incident else None},
     }
