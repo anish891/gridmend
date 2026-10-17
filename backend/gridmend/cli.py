@@ -405,32 +405,6 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_context(args: argparse.Namespace) -> int:
-    from gridmend.flisr.policy import PolicyError, clear_conditions, current_context, set_conditions
-    from gridmend.grid.feeder import live_graph
-
-    g = db.connect().select_graph(live_graph())
-    try:
-        if args.clear:
-            context = clear_conditions(g)
-        elif args.conditions:
-            from gridmend.agent.llm import make_client
-
-            client, model = make_client()
-            context = set_conditions(g, client, model, args.conditions)
-        else:
-            context = current_context(g)
-    except PolicyError as exc:
-        print(exc, file=sys.stderr)
-        return 1
-
-    print(f"conditions: {context['conditions'] or 'normal day'}")
-    for p in context["priorities"]:
-        change = "" if p["weight"] == p["standing"] else f" (standing {p['standing']})"
-        print(f"  {p['facility']} (bus {p['bus']}, Z{p['zone']}): {p['weight']}{change}  {p['rule']}")
-    return 0
-
-
 def cmd_crew(args: argparse.Namespace) -> int:
     from gridmend.flisr.crew import CrewError, crew_reports, file_report, jammed_switches
     from gridmend.grid.feeder import live_graph
@@ -558,11 +532,6 @@ def build_parser() -> argparse.ArgumentParser:
     crew.add_argument("note", nargs="?", help="the crew's note as written; omit to list reports")
     crew.set_defaults(func=cmd_crew)
 
-    context = sub.add_parser("context", help="set today's conditions; the LLM applies the "
-                                              "restoration policy to them")
-    context.add_argument("conditions", nargs="?", help="the operator's report, in plain words")
-    context.add_argument("--clear", action="store_true", help="back to standing priorities")
-    context.set_defaults(func=cmd_context)
     sub.add_parser("locate", help="locate the faulted zone from indicators").set_defaults(
         func=cmd_locate
     )

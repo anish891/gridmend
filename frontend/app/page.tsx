@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import AgentPanel from "@/components/AgentPanel";
 import AskPanel, { type MapFocus } from "@/components/AskPanel";
 import CandidateList from "@/components/CandidateList";
-import Conditions from "@/components/Conditions";
 import CrewReport from "@/components/CrewReport";
 import ExplanationPanel from "@/components/ExplanationPanel";
 import FaultPicker, { type Mode } from "@/components/FaultPicker";
@@ -24,7 +23,7 @@ import Spinner from "@/components/ui/Spinner";
 import Term from "@/components/ui/Term";
 import {
   api, runAgent, type AgentEvent, type CrewFiling, type Explanation, type GridState, type Location,
-  type OperatingContext, type PlanResult, type Results, type SwitchOp, type Trace,
+  type PlanResult, type Results, type SwitchOp, type Trace,
 } from "@/lib/api";
 import { currentFeeder, FEEDERS, type FeederConfig } from "@/lib/feeders";
 import { problemsFor, withSwitch } from "@/lib/overlay";
@@ -66,9 +65,6 @@ export default function Home() {
   const [agentModel, setAgentModel] = useState<string | null>(null);
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
   const [agentRunning, setAgentRunning] = useState(false);
-  const [context, setContext] = useState<OperatingContext | null>(null);
-  const [contextBusy, setContextBusy] = useState(false);
-  const [contextError, setContextError] = useState<string | null>(null);
   const [crewBusy, setCrewBusy] = useState(false);
   const [crewError, setCrewError] = useState<string | null>(null);
   const [crewResult, setCrewResult] = useState<CrewFiling | null>(null);
@@ -315,20 +311,6 @@ export default function Home() {
     }
   }, [run, working, approve, feeder]);
 
-  // New conditions change bus weights, so the diagram and status bar are read back afterwards.
-  const applyConditions = useCallback(async (conditions: string | null) => {
-    setContextBusy(true);
-    setContextError(null);
-    try {
-      setContext(conditions ? await api.setConditions(conditions) : await api.clearConditions());
-      await refresh();
-    } catch (e) {
-      setContextError((e as Error).message);
-    } finally {
-      setContextBusy(false);
-    }
-  }, [refresh]);
-
   const fileCrewReport = useCallback(async (note: string) => {
     setCrewBusy(true);
     setCrewError(null);
@@ -363,8 +345,6 @@ export default function Home() {
       setCrewResult(null);
       setCrewError(null);
       await refresh();
-      // A reset copies the pristine grid, which carries no conditions.
-      setContext(await api.context());
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -384,7 +364,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    api.context().then(setContext).catch(() => setContext(null));
     // Only for the headline numbers; the page works without them.
     api.results().then(setResults).catch(() => setResults(null));
   }, []);
@@ -465,20 +444,11 @@ export default function Home() {
           onDemo={playDemo}
           feeder={feeder}
           results={results}
-          disabled={busy !== null || contextBusy || crewBusy}
+          disabled={busy !== null || crewBusy}
           onFault={(line) => run("fault", line)}
           agentModel={agentModel}
           mode={mode}
           onMode={setMode}
-          conditions={agentModel && (
-            <Conditions
-              context={context}
-              busy={contextBusy}
-              error={contextError}
-              disabled={busy !== null}
-              onApply={applyConditions}
-            />
-          )}
         />
       ) : (
         <Stepper
@@ -517,7 +487,7 @@ export default function Home() {
               problems={problems}
               risk={showRisk ? risk : null}
               focus={focus}
-              onSegmentClick={healthy && !busy && !demo && !contextBusy && !crewBusy ? (line) => run("fault", line) : undefined}
+              onSegmentClick={healthy && !busy && !demo && !crewBusy ? (line) => run("fault", line) : undefined}
             />
           )}
           {showRisk && (
@@ -582,7 +552,7 @@ export default function Home() {
         {healthy ? (
           <Intro />
         ) : (
-          <Timeline fault={fault} locations={locations} trace={trace} conditions={context?.conditions ?? null} />
+          <Timeline fault={fault} locations={locations} trace={trace} />
         )}
       </div>
 

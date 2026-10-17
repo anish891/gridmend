@@ -22,9 +22,6 @@ from gridmend.flisr.explain import explain_incident
 from gridmend.flisr.generation import generation_status, reconnect_generation
 from gridmend.flisr.isolate import IsolateError, isolate
 from gridmend.flisr.locate import LocateError, locate_fault
-from gridmend.flisr.policy import (
-    ModelError, NotHealthyError, PolicyError, clear_conditions, current_context, set_conditions,
-)
 from gridmend.flisr.trace import incident_trace, open_incident, plan_details
 from gridmend.grid.case33 import load_voltages
 from gridmend.grid.dependency import line_dependencies
@@ -84,10 +81,6 @@ class FaultRequest(BaseModel):
 
 class ExecuteRequest(BaseModel):
     plan_id: str
-
-
-class ContextRequest(BaseModel):
-    conditions: str
 
 
 class CrewRequest(BaseModel):
@@ -461,33 +454,6 @@ def results() -> dict:
     return {"summary": summarize(rows), "rows": [asdict(r) for r in rows]}
 
 
-@app.get("/context")
-def context() -> dict:
-    return current_context(live())
-
-
-@app.post("/context")
-def set_context(request: ContextRequest) -> dict:
-    # The LLM reads the policy and the operator's report; deterministic code checks every
-    # priority it proposes before anything is written.
-    if not load_settings().llm_configured:
-        raise HTTPException(503, "no language model is configured")
-    # Shares the agent's lock so only one model call runs at a time.
-    if not _agent_lock.acquire(blocking=False):
-        raise HTTPException(429, "the model is busy with another request; try again shortly")
-    try:
-        client, model = agent_client()
-        return set_conditions(live(), client, model, request.conditions)
-    except NotHealthyError as exc:
-        raise HTTPException(409, str(exc))
-    except ModelError as exc:
-        raise HTTPException(503, str(exc))
-    except PolicyError as exc:
-        raise HTTPException(422, str(exc))
-    finally:
-        _agent_lock.release()
-
-
 @app.post("/whatif")
 def whatif(request: WhatIfRequest) -> dict:
     from gridmend.flisr.whatif import WhatIfError, what_if
@@ -521,14 +487,6 @@ def file_crew_report(request: CrewRequest) -> dict:
         raise HTTPException(422, str(exc))
     finally:
         _agent_lock.release()
-
-
-@app.delete("/context")
-def delete_context() -> dict:
-    try:
-        return clear_conditions(live())
-    except NotHealthyError as exc:
-        raise HTTPException(409, str(exc))
 
 
 @app.post("/reset")

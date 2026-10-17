@@ -283,7 +283,7 @@ def test_questions_are_answered_from_the_graph_with_read_only_tools(client, aske
     events = ask(client, "How is the hospital fed?")
 
     assert asker.question == "How is the hospital fed?"
-    assert set(asker.offered) == {"operating_context", "grid_status", "line_dependencies",
+    assert set(asker.offered) == {"field_reports", "grid_status", "line_dependencies",
                                   "transfer_capacity", "what_if", "fault_impact", "feeding_path",
                                   "explain_plan"}
     tool = events[0]
@@ -325,7 +325,7 @@ def test_each_request_is_served_from_the_feeder_it_names(both_feeders):
     assert client.get("/layout").json() == {"positions": None}
     assert len(client.get("/layout?feeder=oberrhein").json()["positions"]) == 177
     # Every page-load call works on the real network too.
-    for path in ("/context", "/explain", "/trace", "/results", "/risk", "/queries", "/crew", "/generation"):
+    for path in ("/explain", "/trace", "/results", "/risk", "/queries", "/crew", "/generation"):
         assert client.get(f"{path}?feeder=oberrhein").status_code in (200, 404, 409), path
 
 

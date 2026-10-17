@@ -12,9 +12,8 @@ class ExecuteError(Exception):
 
 
 def verified_plans(g: Graph, incident_id: str) -> list[dict]:
-    """Verified plans with the critical facilities each one restores, best first: highest
-    total priority of critical sites restored (policy 1.3), then most load restored, then
-    fewest switch operations. With equal standing priorities this is the count of critical sites."""
+    """Verified plans with the critical facilities each one restores, best first: most
+    critical sites restored, then most load restored, then fewest switch operations."""
     rows = g.ro_query(
         """
         MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {kind: 'restoration', status: 'verified'})

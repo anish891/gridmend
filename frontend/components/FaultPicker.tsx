@@ -14,8 +14,6 @@ type Props = {
   agentModel: string | null;
   mode: Mode;
   onMode: (mode: Mode) => void;
-  // Today's conditions, shown before the faults because they set the priorities.
-  conditions?: React.ReactNode;
   onDemo: () => void;
   feeder: FeederConfig;
   // The evaluation's headline numbers, when results are available.
@@ -49,7 +47,7 @@ function Headline({ results }: { results: Results }) {
 }
 
 export default function FaultPicker(
-  { disabled, onFault, agentModel, mode, onMode, conditions, onDemo, results, feeder }: Props,
+  { disabled, onFault, agentModel, mode, onMode, onDemo, results, feeder }: Props,
 ) {
   return (
     <Card className="hero">
@@ -67,8 +65,6 @@ export default function FaultPicker(
           About 30 seconds: a fault, the plans that fail and why, then the restoration.
         </span>
       </div>
-      {conditions}
-      {conditions && <h2 className="conditions-title">Pick a fault</h2>}
       <div className="demo-faults">
         {feeder.faults.map((f) => (
           <button key={f.line} type="button" className="demo-fault" disabled={disabled} onClick={() => onFault(f.line)}>

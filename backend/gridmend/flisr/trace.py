@@ -38,14 +38,6 @@ def record_incident(g: Graph, zones: list[int]) -> str:
         {"id": incident_id, "lines": ", ".join(lines), "ts": datetime.now(timezone.utc).isoformat()},
     )
     add_fault_zones(g, incident_id, zones)
-    # The incident is handled under the operating conditions in force when it was found.
-    g.query(
-        """
-        MATCH (i:Incident {id: $id}), (c:Context {current: true})
-        CREATE (i)-[:UNDER]->(c)
-        """,
-        {"id": incident_id},
-    )
     # Crew reports filed before the fault (e.g. a switch found jammed on patrol) apply to it too.
     g.query(
         """

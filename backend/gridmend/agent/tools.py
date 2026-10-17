@@ -9,7 +9,6 @@ from gridmend.flisr.explain import explain_incident, feeding_path
 from gridmend.flisr.generation import generation_status
 from gridmend.flisr.isolate import IsolateError, isolate
 from gridmend.flisr.locate import LocateError, locate_fault
-from gridmend.flisr.policy import current_context, load_policy
 from gridmend.flisr.transfer import transfer_limit
 from gridmend.flisr.trace import SwitchOp, open_incident
 from gridmend.flisr.verify import next_plan_id, verify_plan
@@ -38,10 +37,7 @@ def schema(name: str, description: str, properties: dict | None = None,
 SWITCH_LIST = {"type": "array", "items": {"type": "string"}}
 
 SCHEMAS = [
-    schema("operating_context", "Today's operating conditions as reported by the operator, the "
-                                "priority weight of every facility for this incident with the "
-                                "policy rule behind it, the full restoration priority policy, "
-                                "and field crew reports with the switches they found jammed."),
+    schema("field_reports", "Field crew reports and the switches they found jammed."),
     schema("grid_status", "Energized, dark and faulted zones, switch states, load served, and "
                           "distributed generation with whether each unit is online."),
     schema("locate_fault", "Find the faulted zones from the chains of tripped fault indicators. "
@@ -97,7 +93,7 @@ SCHEMAS = [
 
 
 # Tools that only read the grid or plan on throwaway copies, for answering questions.
-READ_ONLY = frozenset({"operating_context", "grid_status", "line_dependencies", "transfer_capacity",
+READ_ONLY = frozenset({"field_reports", "grid_status", "line_dependencies", "transfer_capacity",
                        "what_if", "fault_impact", "feeding_path", "explain_plan"})
 
 
@@ -131,13 +127,8 @@ class GridTools:
             raise ValueError("no active incident")
         return incident["id"]
 
-    def operating_context(self) -> dict:
-        context = current_context(self.g)
+    def field_reports(self) -> dict:
         return {
-            "conditions": context["conditions"] or "normal day: no special conditions reported",
-            "priorities": [{k: p[k] for k in ("facility", "zone", "weight", "rule")}
-                           for p in context["priorities"]],
-            "policy": load_policy(),
             "jammed_switches": jammed_switches(self.g),
             "crew_reports": [{"id": r["id"], "note": r["note"]} for r in crew_reports(self.g)],
         }

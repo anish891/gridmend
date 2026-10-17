@@ -29,13 +29,11 @@ def bus_rows(net, assumptions: dict) -> list[dict]:
         q_kvar[ieee_bus(bus)] += q * 1000
 
     critical = assumptions["critical_loads"]
-    facilities = {**assumptions.get("facilities", {}), **critical}
     weights = assumptions["weights"]
     generation = assumptions.get("generation", {})
     rows = []
     for pp_index in net.bus.index:
         bus = ieee_bus(pp_index)
-        facility = facilities.get(bus)
         rows.append({
             "id": bus,
             "pp_index": int(pp_index),
@@ -43,7 +41,7 @@ def bus_rows(net, assumptions: dict) -> list[dict]:
             "q_kvar": q_kvar[bus],
             "s_kva": math.hypot(p_kw[bus], q_kvar[bus]),
             "critical": bus in critical,
-            "facility": facility or "",
+            "facility": critical.get(bus, ""),
             "weight": weights["critical"] if bus in critical else weights["default"],
             "is_source": bus == assumptions["substation"],
             "dg_kw": float(generation.get(bus, 0.0)),

@@ -26,9 +26,9 @@ def tools() -> GridTools:
     return _tools
 
 
-@server.tool(description=DESCRIPTIONS["operating_context"])
-def operating_context() -> dict:
-    return tools().call("operating_context", {})
+@server.tool(description=DESCRIPTIONS["field_reports"])
+def field_reports() -> dict:
+    return tools().call("field_reports", {})
 
 
 @server.tool(description=DESCRIPTIONS["grid_status"])

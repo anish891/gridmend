@@ -88,7 +88,7 @@ export default function WhatIf({ state, healthy, disabled }: Props) {
 
       <div aria-live="polite">
         {busy ? (
-          <p className="muted small conditions-status"><Spinner /> Planning on copies of the grid…</p>
+          <p className="muted small busy-status"><Spinner /> Planning on copies of the grid…</p>
         ) : error ? (
           <p className="error" role="alert">{error}</p>
         ) : result && (

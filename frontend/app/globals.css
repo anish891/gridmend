@@ -1010,68 +1010,13 @@ a.step-label:hover { text-decoration-color: currentColor; }
 
 .hero-foot p { margin: 0; }
 
-/* Today's conditions */
-
-.conditions {
-  display: grid;
-  gap: var(--space-3);
-  justify-items: start;
-  margin-bottom: var(--space-5);
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--border);
-}
-
-.conditions-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-1) var(--space-3);
-}
-
-.conditions-title {
-  font-size: var(--fs-lg);
-  margin: 0 0 var(--space-3);
-}
-
-.conditions-head .conditions-title { margin: 0; }
-
-.conditions .segmented {
-  flex-wrap: wrap;
-  max-width: 100%;
-}
-
-.conditions-form {
-  display: grid;
-  gap: var(--space-2);
-  justify-items: start;
-  width: min(100%, 640px);
-}
-
-.conditions-form label { font-weight: 500; }
-
-.conditions-result p { margin: 0; }
-
-.conditions-result {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.conditions-status {
+.busy-status {
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
 
-.priority-changes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.priority-list {
+.report-list {
   list-style: none;
   margin: 0 0 var(--space-2);
   padding: 0;
@@ -1096,8 +1041,7 @@ a.step-label:hover { text-decoration-color: currentColor; }
 
 .crew-form label { font-weight: 500; }
 
-.crew-form textarea,
-.conditions-form textarea {
+.crew-form textarea {
   width: 100%;
   font: inherit;
   color: var(--text);
@@ -1967,7 +1911,6 @@ tr.quiet td:not(.bad) { color: var(--muted); }
   .status-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .status-bar .stat:nth-child(4) { grid-column: 1 / -1; border-top: 1px solid var(--border); border-left: 0; }
   .hero { padding: var(--space-4); }
-  .conditions .segmented { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
   .hero h1,
   .page-intro h1 { font-size: var(--fs-xl); }
   .headline { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }

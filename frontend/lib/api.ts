@@ -16,14 +16,6 @@ export type Bus = {
   dg_online: boolean;
 };
 
-export type Priority = { facility: string; weight: number; standing: number; rule: string };
-
-export type OperatingContext = {
-  conditions: string | null;
-  model: string | null;
-  priorities: (Priority & { bus: number; zone: number })[];
-};
-
 export type Line = {
   id: string;
   from: number;
@@ -146,8 +138,6 @@ export type Explanation = {
   rejected: { id: string; ops: string[]; violations: string[] }[];
   transfer: { demand_kva: number; deliverable_kva: number; shortfall_kva: number; bottlenecks: string[] };
   critical: CriticalLoad[];
-  // The conditions and priorities the incident was handled under (null on a normal day).
-  context: { conditions: string; priorities: Priority[] } | null;
   crew_reports: CrewReport[];
   cut_off: { zone: number; via: string }[];
   dark_zones: number[];
@@ -283,9 +273,6 @@ export const api = {
   // Map positions for a feeder without a hand-drawn layout; null for the 33-bus feeder.
   layout: () => call<{ positions: Record<string, [number, number]> | null }>("GET", "/layout"),
   reconnectGeneration: () => call<{ reconnected: number[]; replan: boolean }>("POST", "/generation/reconnect"),
-  context: () => call<OperatingContext>("GET", "/context"),
-  setConditions: (conditions: string) => call<OperatingContext>("POST", "/context", { conditions }),
-  clearConditions: () => call<OperatingContext>("DELETE", "/context"),
   crewReports: () => call<{ reports: CrewReport[] }>("GET", "/crew"),
   fileCrewReport: (note: string) => call<CrewFiling>("POST", "/crew", { note }),
   whatIf: (switches: string[], faultLine: string | null) =>

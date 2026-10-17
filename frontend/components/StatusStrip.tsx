@@ -30,7 +30,7 @@ export default function StatusStrip({ state, trace }: Props) {
 
       <div className="stat stat-wide">
         <div className="stat-label">
-          <Term hint="Sites that get power back first, weighted by the restoration policy for today's conditions.">
+          <Term hint="Sites that get power back first: hospital, fire station, water pumping and telecom.">
             Critical sites
           </Term>
         </div>

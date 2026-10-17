@@ -60,7 +60,7 @@ export default function CrewReport(
 
       <div className="crew-result" aria-live="polite">
         {busy ? (
-          <p className="muted small conditions-status"><Spinner /> Reading the crew&apos;s note…</p>
+          <p className="muted small busy-status"><Spinner /> Reading the crew&apos;s note…</p>
         ) : error ? (
           <p className="error" role="alert">{error}</p>
         ) : result && (

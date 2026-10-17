@@ -122,25 +122,10 @@ export default function ExplanationPanel({ e, onPath = () => {} }: Props) {
         </div>
 
         <div>
-          {e.context && (
-            <>
-              <h3>Conditions and priorities</h3>
-              <p className="muted">{e.context.conditions}</p>
-              <ul className="priority-list">
-                {e.context.priorities.map((p) => (
-                  <li key={p.facility}>
-                    <b>{p.facility}</b> {p.weight}
-                    {p.weight !== p.standing && <span className="muted"> (normally {p.standing})</span>}
-                    <div className="small muted">{p.rule}</div>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
           {e.crew_reports.length > 0 && (
             <>
               <h3>Field crew reports</h3>
-              <ul className="priority-list">
+              <ul className="report-list">
                 {e.crew_reports.map((r) => (
                   <li key={r.id}>
                     <b>{r.id}</b> <span className="muted">&ldquo;{r.note}&rdquo;</span>

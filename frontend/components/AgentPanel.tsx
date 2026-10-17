@@ -32,8 +32,8 @@ export function describe(e: ToolEvent): { label: string; detail: string; bad?: b
       return { label: `Recommended ${r.recommended}`, detail: String(e.args.reason ?? "") };
     case "explain_plan":
       return { label: "Read the decision trace", detail: "" };
-    case "operating_context":
-      return { label: "Read today's conditions and priorities", detail: "" };
+    case "field_reports":
+      return { label: "Read field crew reports", detail: "" };
     case "feeding_path":
       return {
         label: `Traced the feed to bus ${r.bus}${r.facility ? ` (${r.facility})` : ""}`,
