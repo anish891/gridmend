@@ -27,15 +27,18 @@ FLOW_NETWORK = [
     # Online generation is a second supply, modelled as an edge from the substation rated at
     # its output so a single-source max flow still applies.
     """
-    MATCH (s:Bus {is_source: true}), (g:Bus)
-    WHERE coalesce(g.dg_online, false) AND NOT g.is_source
+    MATCH (s:Bus {is_source: true})
+    WITH s ORDER BY s.id LIMIT 1
+    MATCH (g:Bus) WHERE coalesce(g.dg_online, false) AND NOT g.is_source
     CREATE (s)-[:FLOW {cap_kva: g.dg_kw}]->(g)
     """,
 ]
 
 TRANSFER_QUERY = """
-MATCH (s:Bus {is_source: true}), (t:Sink)
-CALL algo.maxFlow({sourceNodes: [s], targetNodes: [t], capacityProperty: 'cap_kva',
+MATCH (s:Bus {is_source: true})
+WITH collect(s) AS sources
+MATCH (t:Sink)
+CALL algo.maxFlow({sourceNodes: sources, targetNodes: [t], capacityProperty: 'cap_kva',
                    relationshipTypes: ['FLOW']})
 YIELD edges, edgeFlows, maxFlow
 RETURN maxFlow AS deliverable_kva,

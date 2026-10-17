@@ -11,7 +11,7 @@ from gridmend.grid.energize import grid_status
 # Switches on the conducting path from the substation into a zone, in order.
 FEEDING_PATH_QUERY = """
 MATCH (s:Bus {is_source: true}), (t:Bus {id: $zone})
-MATCH p = (s)-[:SEG|SW*0..40]-(t)
+MATCH p = (s)-[:SEG|SW*0..100]-(t)
 WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
 RETURN [r IN relationships(p) WHERE type(r) = 'SW' | r.id] AS switches
 ORDER BY length(p)

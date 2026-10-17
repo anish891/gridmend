@@ -51,7 +51,7 @@ def indicator_chain(g: Graph, zone: int) -> list[str]:
     rows = g.ro_query(
         """
         MATCH (s:Bus {is_source: true}), (z:Zone {id: $zone})<-[:IN_ZONE]-(t:Bus)
-        MATCH p = (s)-[:SEG|SW*1..40]-(t)
+        MATCH p = (s)-[:SEG|SW*1..100]-(t)
         WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.kind <> 'tie')
         RETURN [r IN relationships(p) WHERE type(r) = 'SW' | [r.id, r.fi]]
         ORDER BY length(p)

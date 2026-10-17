@@ -68,9 +68,9 @@ def isolation_ops(g: Graph, zones: list[int]) -> list[SwitchOp]:
     boundary = sorted(rows, key=lambda r: (not r[1], [int(x) for x in r[0].split("-")]))
     ops = [SwitchOp(switch_id, "open") for switch_id, _ in boundary]
 
-    breaker, status, operable, fed_zone = g.ro_query(BREAKER_QUERY).result_set[0]
-    if status == "open" and operable and fed_zone not in zones:
-        ops.append(SwitchOp(breaker, "close"))
+    for breaker, status, operable, fed_zone in g.ro_query(BREAKER_QUERY).result_set:
+        if status == "open" and operable and fed_zone not in zones:
+            ops.append(SwitchOp(breaker, "close"))
     return ops
 
 

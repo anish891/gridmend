@@ -1,0 +1,19 @@
+# Synthetic operating assumptions layered on pandapower's mv_oberrhein network: two 110/20 kV
+# substations, four 20 kV feeders and six normally open points between them. Bus and line ids
+# are GridMend's own: buses are numbered outward from the substations (1 and 2), and a line id
+# names its upstream bus first.
+
+# Remote-controlled sectionalizers are placed so each zone holds about this many buses; the
+# real network has a switch at nearly every line end, which would make every bus its own zone.
+zone_buses: 10
+
+# The largest load on each feeder, in feeder order, stands in for these sites.
+critical_sites: [hospital, fire station, water pumping, telecom]
+
+weights:
+  critical: 10
+  default: 1
+
+# The case's load scaling (0.6) is applied; its generators are scaled to zero, so none modelled.
+voltage_min_pu: 0.90
+voltage_max_pu: 1.05

@@ -87,34 +87,41 @@ def keep_conducting_edges(fork: Graph) -> None:
 
 
 RADIALITY_QUERY = """
-MATCH (s:Bus {is_source: true})
 CALL algo.MSF({nodeLabels: ['Bus'], relationshipTypes: ['SEG', 'SW'],
                weightAttribute: 'tree_weight'})
 YIELD nodes, edges
-WITH s, nodes, edges WHERE s IN nodes
-WITH nodes, [e IN edges | e.id] AS tree
+WITH nodes, [e IN edges | e.id] AS tree, [n IN nodes WHERE n.is_source | n.id] AS sources
+WHERE size(sources) > 0
 OPTIONAL MATCH (a:Bus)-[r:SEG|SW]->(:Bus)
 WHERE a IN nodes AND NOT r.id IN tree
-RETURN size(nodes) AS energized_buses, collect(r.id) AS loop_edges
+RETURN size(nodes) AS energized_buses, sources, collect(r.id) AS loop_edges
 """
 
 
 def check_radiality(fork: Graph) -> list[tuple[str, str]]:
     """Expects a fork holding only conducting edges (see keep_conducting_edges)."""
-    # The source's spanning tree covers every energized bus; any conducting edge it cannot
-    # use joins two buses that are already connected, so it closes a loop.
-    buses, loops = fork.ro_query(RADIALITY_QUERY).result_set[0]
-    if not loops:
-        return []
-    verb = "closes a loop" if len(loops) == 1 else "close loops"
-    return [("radiality", f"{', '.join(sorted(loops))} {verb}: {buses - 1 + len(loops)} "
-                          f"conducting edges among {buses} energized buses (a tree has "
-                          f"{buses - 1})")]
+    # Each source's spanning tree covers the buses it energizes; any conducting edge a tree
+    # cannot use joins two buses that are already connected, so it closes a loop. A tree that
+    # reaches two substations parallels them through the transmission grid, also a loop.
+    rows = fork.ro_query(RADIALITY_QUERY).result_set
+    violations = []
+    loops = sorted(edge for _, _, edges in rows for edge in edges)
+    if loops:
+        buses = sum(size for size, _, _ in rows)
+        verb = "closes a loop" if len(loops) == 1 else "close loops"
+        violations.append(("radiality", f"{', '.join(loops)} {verb}: {buses - len(rows) + len(loops)} "
+                                        f"conducting edges among {buses} energized buses (radial "
+                                        f"networks have {buses - len(rows)})"))
+    for _, sources, _ in rows:
+        if len(sources) > 1:
+            violations.append(("radiality", f"the plan joins substations at buses "
+                                            f"{' and '.join(map(str, sorted(sources)))} into one network"))
+    return violations
 
 
 LOADING_QUERY = f"""
 MATCH (s:Bus {{is_source: true}})
-MATCH p = (s)-[:SEG|SW*0..40]-(b:Bus {{energized: true}})
+MATCH p = (s)-[:SEG|SW*0..100]-(b:Bus {{energized: true}})
 WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
 UNWIND relationships(p) AS r
 WITH r, sum({NET_P_KW}) AS p_kw, sum(b.q_kvar) AS q_kvar

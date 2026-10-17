@@ -42,6 +42,14 @@ def load_network() -> pandapowerNet:
 _VOLTAGES: dict[tuple[frozenset[str], frozenset[tuple[int, float]]], dict[int, float]] = {}
 
 
+def line_ids(net) -> list[str]:
+    return [line_id(f, t) for f, t in zip(net.line.from_bus, net.line.to_bus)]
+
+
+def bus_map(net) -> dict[int, int]:
+    return {int(i): ieee_bus(i) for i in net.bus.index}
+
+
 class PowerFlowError(Exception):
     pass
 
@@ -54,19 +62,23 @@ def bus_voltages(conducting: set[str], generation: dict[int, float] | None = Non
     if key not in _VOLTAGES:
         import pandapower as pp
 
-        net = load_network()
-        net.line["in_service"] = [
-            line_id(f, t) in conducting for f, t in zip(net.line.from_bus, net.line.to_bus)
-        ]
+        from gridmend.grid.feeder import network_module
+
+        module = network_module()
+        net = module.load_network()
+        net.line["in_service"] = [lid in conducting for lid in module.line_ids(net)]
+        buses = module.bus_map(net)
+        pp_index = {bus: i for i, bus in buses.items()}
         for bus, kw in generation.items():
-            pp.create_sgen(net, bus - 1, p_mw=kw / 1000)
+            pp.create_sgen(net, pp_index[bus], p_mw=kw / 1000)
         try:
             pp.runpp(net, numba=False)
         except pp.LoadflowNotConverged as exc:
             raise PowerFlowError("power flow did not converge") from exc
         # Buses cut off from the source come back as NaN.
         vm = net.res_bus.vm_pu.dropna()
-        _VOLTAGES[key] = {ieee_bus(i): float(v) for i, v in vm.items()}
+        # Buses outside the twin (the 110 kV side of a substation) are left out.
+        _VOLTAGES[key] = {buses[i]: float(v) for i, v in vm.items() if i in buses}
     return _VOLTAGES[key]
 
 
@@ -99,19 +111,23 @@ class BaseCase:
 def run_base_case() -> BaseCase:
     import pandapower as pp
 
-    net = load_network()
+    from gridmend.grid.feeder import network_module
+
+    module = network_module()
+    net = module.load_network()
     pp.runpp(net, numba=False)
 
-    ids = [line_id(f, t) for f, t in zip(net.line.from_bus, net.line.to_bus)]
+    ids = module.line_ids(net)
+    buses = module.bus_map(net)
     in_service = net.line.in_service.tolist()
-    vm = net.res_bus.vm_pu
+    vm = net.res_bus.vm_pu[[i for i in net.res_bus.index if i in buses]]
 
     return BaseCase(
-        buses=len(net.bus),
+        buses=len(buses),
         closed_lines=[i for i, on in zip(ids, in_service) if on],
         ties=[i for i, on in zip(ids, in_service) if not on],
-        load_kw=float(net.load.p_mw.sum() * 1000),
+        load_kw=float((net.load.p_mw * net.load.scaling).sum() * 1000),
         losses_kw=float(net.res_line.pl_mw.sum() * 1000),
         min_v_pu=float(vm.min()),
-        min_v_bus=ieee_bus(vm.idxmin()),
+        min_v_bus=buses[vm.idxmin()],
     )

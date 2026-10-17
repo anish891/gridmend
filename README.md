@@ -369,6 +369,35 @@ deterministic, so `gridmend eval --llm-only` records its rows in
 the image build, replays them. The Results page also shows, as a faded bar, the load each unsafe
 plan claimed it would restore before the verifier caught it.
 
+### Scaling to a real network
+
+The same code runs on pandapower's `mv_oberrhein`, a real 20 kV network: 177 buses, two 110/20
+kV substations, four feeders, real cable ratings and six normally open points, three of them
+between the substations. Remote-controlled sectionalizers are placed so zones hold about ten
+buses (20 zones), and the largest load on each feeder stands in for a critical site
+([`oberrhein.yaml`](backend/data/oberrhein.yaml)). It loads into separate graphs, so the UI and
+the 33-bus twin are untouched:
+
+```bash
+export GRIDMEND_FEEDER=oberrhein
+gridmend load                              # writes oberrhein_base and oberrhein_live
+gridmend run 13-19 --auto                  # a fault trips only its own feeder's breaker
+gridmend eval                              # every segment; writes backend/eval/out/oberrhein/
+```
+
+Over all 155 single faults:
+
+| method | restored kW | unsafe plans | mean planning ms |
+|---|---:|---:|---:|
+| isolate-only | 0 | 0 | 0 |
+| greedy | 167490 | 44 | 17 |
+| **gridmend** | **387318** | **0** | **318** |
+
+Greedy's unsafe switching claimed 409 MW, more than GridMend restored safely, but 44 of its plans
+would have tripped. The brute-force oracle handles one substation, so there is no optimum here;
+GridMend's plans rest on the fork checks alone, which also catch a plan that would join the two
+substations into one network.
+
 ## Architecture
 
 ![GridMend architecture: the UI, MCP clients and the LLM reach the grid only through agent tools; a deterministic pipeline verifies every plan on a FalkorDB fork before it runs](docs/architecture.svg)
@@ -407,7 +436,7 @@ gridmend dg --reconnect                    # solar on bus 21 returns once its zo
 gridmend plan                              # stage 2: its output frees line 2-19 for zone Z10
 gridmend reset
 gridmend whatif 6-7 --fault 4-5            # what a jammed 6-7 would cost, on copies of the grid
-pytest                                     # 146 tests, on scratch graphs
+pytest                                     # 150 tests, on scratch graphs
 gridmend eval                              # writes backend/eval/out/results.{csv,md}
 gridmend api                               # HTTP API on :8000
 

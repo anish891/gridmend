@@ -48,7 +48,7 @@ def trip(g: Graph) -> list[str]:
         for switch_id in g.ro_query(
             """
             MATCH (s:Bus {is_source: true})
-            MATCH p = (s)-[:SEG|SW*0..40]-(:Bus {id: $bus})
+            MATCH p = (s)-[:SEG|SW*0..100]-(:Bus {id: $bus})
             WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
             RETURN [r IN relationships(p) WHERE type(r) = 'SW' | r.id]
             ORDER BY length(p)
@@ -66,7 +66,9 @@ def trip(g: Graph) -> list[str]:
         """,
         {"path": path},
     )
-    g.query("MATCH ()-[s:SW {kind: 'breaker'}]->() SET s.status = 'open'")
+    # Only the breakers fault current flowed through trip: the faulted feeders, not the others.
+    g.query("MATCH ()-[s:SW {kind: 'breaker'}]->() WHERE s.id IN $path SET s.status = 'open'",
+            {"path": path})
     refresh_energization(g)
     return path
 

@@ -11,6 +11,7 @@ from gridmend.flisr.execute import restore
 from gridmend.flisr.isolate import secure
 from gridmend.flisr.trace import SwitchOp
 from gridmend.flisr.verify import verify_plan
+from gridmend.grid import feeder
 from gridmend.grid.case33 import save_voltages
 from gridmend.grid.load import BASE_GRAPH
 from gridmend.sim import apply_fault
@@ -19,7 +20,8 @@ if TYPE_CHECKING:
     from eval.optimal import Feeder
 
 EVAL_GRAPH = "grid_eval"
-OUT_DIR = Path(__file__).resolve().parent / "out"
+# The IEEE 33-bus results stay where the API and image expect them; other feeders get a subfolder.
+OUT_DIR = Path(__file__).resolve().parent / "out" / ("" if feeder.NAME == "ieee33" else feeder.NAME)
 # The LLM-only baseline needs a model endpoint and is not deterministic, so `eval --llm-only`
 # records its rows here and later runs, including the image build, replay them.
 RECORDED_LLM = Path(__file__).resolve().parent / "llm_only.csv"
@@ -145,7 +147,7 @@ def run_llm_only(db: FalkorDB, line: str, client, model: str) -> Row:
     return row
 
 
-def run_gridmend(db: FalkorDB, feeder: "Feeder", line: str) -> Row:
+def run_gridmend(db: FalkorDB, oracle: "Feeder | None", line: str) -> Row:
     g, incident_id = isolated_graph(db, line)
     start = time.perf_counter()
     _, executed = restore(db, g, incident_id, approve=lambda plan: True)
@@ -155,14 +157,16 @@ def run_gridmend(db: FalkorDB, feeder: "Feeder", line: str) -> Row:
         return Row(line, "gridmend", 0.0, 0, 0, 0, plan_ms,
                    unserved_kw=unserved_kw, critical_dark=critical_dark)
 
-    # Re-check the executed configuration with the independent oracle.
-    closed = frozenset(row[0] for row in g.ro_query(
-        "MATCH ()-[s:SW {status: 'closed'}]->() RETURN s.id"
-    ).result_set)
-    faulted = feeder.isolated_state(line)[0]
-    oracle = feeder.evaluate(closed, faulted)
+    # Re-check the executed configuration with the independent oracle, where there is one; the
+    # oracle handles one substation, so a two-substation feeder relies on the fork checks alone.
+    violations = 0
+    if oracle is not None:
+        closed = frozenset(row[0] for row in g.ro_query(
+            "MATCH ()-[s:SW {status: 'closed'}]->() RETURN s.id"
+        ).result_set)
+        violations = len(oracle.evaluate(closed, oracle.isolated_state(line)[0]).violations)
     return Row(line, "gridmend", executed["restored_kw"], len(executed["critical"]),
-               executed["switch_ops"], len(oracle.violations), plan_ms,
+               executed["switch_ops"], violations, plan_ms,
                unserved_kw=unserved_kw, critical_dark=critical_dark)
 
 
@@ -190,15 +194,22 @@ def run_all(db: FalkorDB, extra_methods=()) -> list[Row]:
     # The oracle needs networkx and pandapower; the API only reads results, so import it here.
     from eval.optimal import Feeder
 
-    feeder = Feeder()
+    if feeder.NAME == "ieee33":
+        oracle = Feeder()
+        segments = oracle.segments
+    else:
+        oracle = None
+        segments = [row[0] for row in db.select_graph(BASE_GRAPH).ro_query(
+            "MATCH ()-[s:SEG]->() RETURN s.id ORDER BY s.id"
+        ).result_set]
     rows = []
-    for line in feeder.segments:
-        optimal = run_optimal(feeder, line)
+    for line in segments:
+        optimal = run_optimal(oracle, line) if oracle else None
         scenario = [Row(line, "isolate-only", 0.0, 0, 0, 0, 0.0), run_greedy(db, line)]
         scenario += [method(db, line) for method in extra_methods]
-        scenario += [run_gridmend(db, feeder, line), optimal]
+        scenario += [run_gridmend(db, oracle, line)] + ([optimal] if optimal else [])
         for row in scenario:
-            row.optimal_kw = optimal.restored_kw
+            row.optimal_kw = optimal.restored_kw if optimal else 0.0
         rows += scenario
     if EVAL_GRAPH in db.list_graphs():
         db.select_graph(EVAL_GRAPH).delete()
@@ -251,7 +262,7 @@ def markdown(rows: list[Row], summary: list[dict]) -> str:
 
 
 def write_outputs(rows: list[Row], summary: list[dict]) -> Path:
-    OUT_DIR.mkdir(exist_ok=True)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     with open(OUT_DIR / "results.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(asdict(rows[0])))
         writer.writeheader()

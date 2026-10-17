@@ -4,14 +4,14 @@ from pathlib import Path
 import yaml
 from falkordb import FalkorDB
 
-from gridmend.grid.case33 import ieee_bus, line_id, load_network
+from gridmend.grid import feeder
+from gridmend.grid.case33 import ieee_bus, line_id
 from gridmend.grid.energize import refresh_energization
 from gridmend.grid.zones import build_zones
 
-ASSUMPTIONS_PATH = Path(__file__).resolve().parents[2] / "data" / "assumptions.yaml"
-
-BASE_GRAPH = "grid_base"
-LIVE_GRAPH = "grid_live"
+ASSUMPTIONS_PATH = feeder.ASSUMPTIONS_PATH
+BASE_GRAPH = feeder.BASE_GRAPH
+LIVE_GRAPH = feeder.LIVE_GRAPH
 
 
 def load_assumptions() -> dict:
@@ -95,10 +95,14 @@ def line_rows(net, assumptions: dict) -> tuple[list[dict], list[dict]]:
 
 
 def write_graph(db: FalkorDB) -> dict:
-    net = load_network()
+    module = feeder.network_module()
+    net = module.load_network()
     assumptions = load_assumptions()
-    buses = bus_rows(net, assumptions)
-    segs, switches = line_rows(net, assumptions)
+    if feeder.NAME == "ieee33":
+        buses = bus_rows(net, assumptions)
+        segs, switches = line_rows(net, assumptions)
+    else:
+        buses, segs, switches = module.rows(net, assumptions)
 
     existing = set(db.list_graphs())
     for name in (BASE_GRAPH, LIVE_GRAPH):

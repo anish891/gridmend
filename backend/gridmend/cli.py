@@ -390,9 +390,11 @@ def cmd_eval(args: argparse.Namespace) -> int:
         client, model = make_client()
         extra.append(lambda conn, line: run_llm_only(conn, line, client, model))
     rows = run_all(db.connect(), extra)
+    from gridmend.grid import feeder
+
     if args.llm_only:
         record_llm_only(rows)
-    else:
+    elif feeder.NAME == "ieee33":
         rows = with_recorded_llm_only(rows)
     summary = summarize(rows)
     out = write_outputs(rows, summary)
@@ -506,10 +508,11 @@ def cmd_dg(args: argparse.Namespace) -> int:
 
 
 def cmd_reset(args: argparse.Namespace) -> int:
+    from gridmend.grid.load import BASE_GRAPH, LIVE_GRAPH
     from gridmend.sim import reset
 
     reset(db.connect())
-    print("grid_live reset from grid_base")
+    print(f"{LIVE_GRAPH} reset from {BASE_GRAPH}")
     return 0
 
 

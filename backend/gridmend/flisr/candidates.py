@@ -95,7 +95,7 @@ def read_situation(g: Graph) -> Situation:
 
 SCREEN_QUERY = f"""
 MATCH (s:Bus {{is_source: true}})
-MATCH p = (s)-[:SEG|SW*0..40]-(b:Bus)
+MATCH p = (s)-[:SEG|SW*0..100]-(b:Bus)
 WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.id IN $closed)
 RETURN b.id, b.zone, {NET_P_KW}, b.q_kvar,
        [r IN relationships(p) | r.id], [r IN relationships(p) | r.cap_kva]
