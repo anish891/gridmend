@@ -19,7 +19,7 @@ const ORIGIN = {
 };
 
 // The verifier's check names, in the operator's words.
-const VIOLATION_LABEL: Record<string, string> = {
+export const VIOLATION_LABEL: Record<string, string> = {
   isolation: "Re-energizes the fault",
   connectivity: "Leaves a zone dark",
   radiality: "Creates a loop",

@@ -7,9 +7,10 @@ import AskPanel, { type MapFocus } from "@/components/AskPanel";
 import CandidateList from "@/components/CandidateList";
 import CrewReport from "@/components/CrewReport";
 import ExplanationPanel from "@/components/ExplanationPanel";
-import FaultPicker from "@/components/FaultPicker";
+import Hero from "@/components/Hero";
 import FeederDiagram, { RISK_STEPS, type Positions, type Pulse, type Risk } from "@/components/FeederDiagram";
 import Intro from "@/components/Intro";
+import ScenarioBuilder, { MAX_FAULTS, type Scenario } from "@/components/ScenarioBuilder";
 import StatusStrip from "@/components/StatusStrip";
 import Stepper from "@/components/Stepper";
 import Timeline from "@/components/Timeline";
@@ -70,6 +71,9 @@ export default function Home() {
   const [demo, setDemo] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
   const [feeder, setFeeder] = useState<FeederConfig>(FEEDERS.ieee33);
+  // The incident being built on the map before the feeder trips.
+  const [scenario, setScenario] = useState<Scenario>({ lines: [], switches: [] });
+  const [sideTab, setSideTab] = useState<"incident" | "ask" | "crew">("incident");
   // Positions for a feeder drawn from its coordinates; the 33-bus map needs none.
   const [positions, setPositions] = useState<Positions | null>(null);
 
@@ -164,6 +168,7 @@ export default function Home() {
 
   const runWithAgent = useCallback(async (): Promise<PlanResult | null> => {
     setError(null);
+    setSideTab("incident");
     setAgentEvents([]);
     setAgentRunning(true);
     working(STEP.locate, "The operator agent is starting on the incident");
@@ -229,6 +234,30 @@ export default function Home() {
       setBusy(null);
     }
   }, [refresh, working, replay]);
+
+  // Switches set to jam are applied before the fault, as if a crew had found them on patrol.
+  const runScenario = useCallback(async (picked: Scenario) => {
+    setError(null);
+    try {
+      for (const id of picked.switches) await api.jam(id);
+      if (picked.switches.length) await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+      return;
+    }
+    setScenario({ lines: [], switches: [] });
+    await startFault(picked.lines);
+  }, [refresh, startFault]);
+
+  const toggleLine = useCallback((line: string) => setScenario((current) => (
+    current.lines.includes(line) ? { ...current, lines: current.lines.filter((l) => l !== line) }
+      : current.lines.length < MAX_FAULTS ? { ...current, lines: [...current.lines, line] } : current
+  )), []);
+
+  const toggleSwitch = useCallback((id: string) => setScenario((current) => (
+    current.switches.includes(id) ? { ...current, switches: current.switches.filter((s) => s !== id) }
+      : { ...current, switches: [...current.switches, id] }
+  )), []);
 
   // Solar tripped with the fault; once its zone has had power for a while it can reconnect,
   // and its output relieves the lines feeding the restored area, so planning runs again.
@@ -360,6 +389,14 @@ export default function Home() {
         if (faulted.length) setFault(faulted.join(" and "));
         if (s.incident) setTrace(await api.trace());
         if (s.incident?.status === "restored") setExplanation(await api.explain());
+        // Plans the agent already designed for this incident, so they can still be approved.
+        if (s.incident?.status === "isolated") {
+          const designed = await api.plans();
+          if (designed.candidates.length) {
+            setPlan(designed);
+            setSelected(designed.recommended);
+          }
+        }
       })
       .catch((e: Error) => setError(`Cannot reach the API: ${e.message}`));
   }, [refresh]);
@@ -400,6 +437,9 @@ export default function Home() {
     : null;
 
   const picking = healthy && !busy && !demo;
+  // While the feeder is healthy, map clicks build the scenario instead of acting at once.
+  const building = picking && agentModel !== null && !crewBusy;
+  const incidentTab = healthy && !busy ? "Scenario" : "Agent";
 
   return (
     <main>
@@ -417,14 +457,7 @@ export default function Home() {
           <p className="muted small">Loading the feeder, its switches and the current incident.</p>
         </Card>
       ) : picking ? (
-        <FaultPicker
-          onDemo={playDemo}
-          feeder={feeder}
-          results={results}
-          disabled={busy !== null || crewBusy}
-          onFault={startFault}
-          agentModel={agentModel}
-        />
+        <Hero onDemo={playDemo} results={results} disabled={busy !== null || crewBusy} agentModel={agentModel} />
       ) : (
         <Stepper
           done={done}
@@ -442,7 +475,7 @@ export default function Home() {
           id="map"
           className="diagram-card"
           title="Feeder map"
-          hint={picking ? `${feeder.label}. Click a line to fault it, hover anything for details`
+          hint={building ? `${feeder.label}. Click lines to fault them and switches to jam them`
             : `${feeder.label}. Hover anything for details`}
           actions={
             <Segmented
@@ -462,7 +495,9 @@ export default function Home() {
               problems={problems}
               risk={showRisk ? risk : null}
               focus={focus}
-              onSegmentClick={healthy && agentModel && !busy && !demo && !crewBusy ? startFault : undefined}
+              onSegmentClick={building ? toggleLine : undefined}
+              onSwitchClick={building ? toggleSwitch : undefined}
+              picked={building ? scenario : undefined}
             />
           )}
           {showRisk && (
@@ -524,17 +559,49 @@ export default function Home() {
           </ul>
         </Card>
 
-        {healthy ? (
-          <Intro />
-        ) : (
-          <Timeline fault={fault} locations={locations} trace={trace} />
-        )}
+        <aside className="side" aria-label="Incident tools">
+          <Segmented
+            label="Side panel"
+            value={sideTab}
+            onChange={setSideTab}
+            options={[
+              { value: "incident", label: incidentTab },
+              ...(agentModel ? [{ value: "ask" as const, label: "Ask" }, { value: "crew" as const, label: "Crew" }] : []),
+            ]}
+          />
+          {sideTab === "incident" && (
+            healthy && !busy ? (
+              agentModel ? (
+                <Card className="side-card">
+                  <ScenarioBuilder feeder={feeder} scenario={scenario} onChange={setScenario}
+                    onRun={runScenario} disabled={busy !== null || demo || crewBusy} />
+                </Card>
+              ) : <Intro />
+            ) : agentRunning || agentEvents.length > 0 ? (
+              <AgentPanel model={agentModel} events={agentEvents} running={agentRunning} />
+            ) : (
+              <Timeline fault={fault} locations={locations} trace={trace} />
+            )
+          )}
+          {sideTab === "ask" && agentModel && state && (
+            <AskPanel incident={!healthy} questions={feeder.questions} onFocus={setFocus} />
+          )}
+          {sideTab === "crew" && agentModel && state && (
+            <CrewReport
+              jammed={state.lines.filter((l) => !l.operable)}
+              examples={feeder.crewExamples}
+              placeholder={feeder.crewPlaceholder}
+              busy={crewBusy}
+              error={crewError}
+              result={crewResult}
+              disabled={busy !== null}
+              onFile={fileCrewReport}
+            />
+          )}
+          {healthy && sideTab === "incident" && agentModel && <Intro />}
+        </aside>
       </div>
 
-      {agentModel && state && <AskPanel incident={!healthy} questions={feeder.questions} onFocus={setFocus} />}
-      {(agentRunning || agentEvents.length > 0) && (
-        <AgentPanel model={agentModel} events={agentEvents} running={agentRunning} />
-      )}
       {plan && (
         <Card
           id="plans"
@@ -558,22 +625,6 @@ export default function Home() {
             />
           )}
         </Card>
-      )}
-      {state && status !== "restored" && (
-        <div className="tools">
-          {agentModel && (
-            <CrewReport
-              jammed={state.lines.filter((l) => !l.operable)}
-              examples={feeder.crewExamples}
-              placeholder={feeder.crewPlaceholder}
-              busy={crewBusy}
-              error={crewError}
-              result={crewResult}
-              disabled={busy !== null}
-              onFile={fileCrewReport}
-            />
-          )}
-        </div>
       )}
       {explanation && (
         <ExplanationPanel e={explanation} onPath={(zone) => setFocus(zone === null ? null : { bus: zone, lines: [] })} />

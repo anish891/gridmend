@@ -80,7 +80,7 @@ export default function AskPanel({ incident, questions, onFocus }: Props) {
       id="ask"
       className="ask-panel"
       title="Ask the grid"
-      hint="Answered by the AI from graph tools only. It can read the grid and plan on copies, never switch anything"
+      hint="Answered by the AI from graph tools only. It reads the twin and never switches anything"
     >
       <form className="ask-form" onSubmit={(e) => { e.preventDefault(); ask(question); }}>
         <input

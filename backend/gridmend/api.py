@@ -24,7 +24,7 @@ from gridmend.grid.case33 import load_voltages
 from gridmend.grid.dependency import line_dependencies
 from gridmend.grid.energize import grid_status
 from gridmend.grid import feeder
-from gridmend.sim import FaultError, apply_faults, reset
+from gridmend.sim import FaultError, apply_faults, reset, set_jammed
 
 
 def graph_name() -> str:
@@ -73,6 +73,11 @@ class FaultRequest(BaseModel):
     line: str | None = None
     # Several segments at once, for simultaneous faults.
     lines: list[str] | None = None
+
+
+class JamRequest(BaseModel):
+    switch_id: str
+    jammed: bool = True
 
 
 class ExecuteRequest(BaseModel):
@@ -174,6 +179,16 @@ def fault(request: FaultRequest) -> dict:
     except FaultError as exc:
         raise HTTPException(400, str(exc))
     return {"line": lines[0], "lines": lines, "indicators_set": tripped}
+
+
+@app.post("/jam")
+def jam(request: JamRequest) -> dict:
+    """Scenario setup: mark a switch as one that will not operate when the fault comes."""
+    try:
+        set_jammed(live(), request.switch_id, request.jammed)
+    except FaultError as exc:
+        raise HTTPException(400, str(exc))
+    return {"switch_id": request.switch_id, "jammed": request.jammed}
 
 
 @app.get("/generation")

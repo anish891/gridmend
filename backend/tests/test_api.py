@@ -351,3 +351,13 @@ def test_the_agent_works_an_oberrhein_fault_through_the_api(both_feeders, monkey
     assert client.get("/state?feeder=oberrhein").json()["incident"]["status"] == "isolated"
     # The 33-bus twin is untouched.
     assert client.get("/state").json()["incident"] is None
+
+
+def test_a_scenario_can_jam_switches_before_the_fault(client):
+    assert client.post("/jam", json={"switch_id": "6-7"}).status_code == 200
+    lines = {l["id"]: l for l in client.get("/state").json()["lines"]}
+    assert lines["6-7"]["operable"] is False
+    assert client.post("/jam", json={"switch_id": "4-5"}).status_code == 400
+    assert client.post("/jam", json={"switch_id": "6-7", "jammed": False}).status_code == 200
+    client.post("/fault", json={"line": "4-5"})
+    assert client.post("/jam", json={"switch_id": "9-10"}).status_code == 400

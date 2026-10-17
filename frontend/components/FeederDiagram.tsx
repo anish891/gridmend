@@ -57,9 +57,12 @@ function carriesText(line: Line): string[] {
   ];
 }
 
+// Which elements a click acts on right now, for the hover text.
+type Clickable = { lines: boolean; switches: boolean };
+
 // Hover text for a bus, segment or switch, read from the latest grid state.
 function describe(
-  state: GridState, kind: string, id: string, clickable: boolean, risk: Risk | null,
+  state: GridState, kind: string, id: string, clickable: Clickable, risk: Risk | null,
 ): Omit<Tooltip, "x" | "y"> {
   if (kind === "zone") {
     const zone = state.zones.find((z) => `${z.id}` === id)!;
@@ -105,7 +108,7 @@ function describe(
              atRisk.critical_dark.length ? `critical loads lost: ${atRisk.critical_dark.join(", ")}` : "no critical load lost"]
           : []),
         ...(line.faulted ? ["FAULTED"] : []),
-        ...(clickable ? ["click to fault this line"] : []),
+        ...(clickable.lines ? ["click to add it to the scenario as a fault"] : []),
       ],
     };
   }
@@ -117,6 +120,7 @@ function describe(
       `rated ${line.cap_kva} kVA`,
       ...(line.operable ? [] : [`JAMMED: cannot be operated${line.report ? ` (crew report ${line.report})` : ""}`]),
       ...carriesText(line),
+      ...(clickable.switches ? ["click to make it jam in the scenario"] : []),
     ],
   };
 }
@@ -405,6 +409,13 @@ const styleFor = (COLORS: Colors): cytoscape.StylesheetJson => [
   },
   { selector: "node.low-v", style: { "border-color": COLORS.faulted, "border-width": 3 } },
   { selector: "edge.segment.hover", style: { width: 7 } },
+  { selector: "node.switch.hover", style: { width: 18, height: 18 } },
+  // Picked for the scenario being built: lines to fault, switches that will not operate.
+  { selector: "edge.segment.picked", style: { width: 7, "line-color": COLORS.faulted, "line-style": "dashed" } },
+  {
+    selector: "node.switch.picked",
+    style: { "background-color": COLORS.faulted, "border-color": COLORS.faulted, width: 16, height: 16 },
+  },
   // Risk map: segments coloured by what a fault there leaves dark; everything else recedes.
   { selector: ".risk-faded", style: { opacity: 0.25 } },
   { selector: "edge.risk", style: { width: 7, "line-color": "data(risk)", "line-style": "solid" } },
@@ -430,6 +441,9 @@ const styleFor = (COLORS: Colors): cytoscape.StylesheetJson => [
 type Props = {
   state: GridState;
   onSegmentClick?: (lineId: string) => void;
+  onSwitchClick?: (switchId: string) => void;
+  // Lines and switches picked for the scenario being built.
+  picked?: { lines: string[]; switches: string[] };
   highlight?: SwitchOp[];
   pulse?: Pulse | null;
   problems?: Problems | null;
@@ -444,13 +458,18 @@ const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export default function FeederDiagram(
-  { state, onSegmentClick, highlight = [], pulse, problems, risk = null, focus = null, positions = null }: Props,
+  {
+    state, onSegmentClick, onSwitchClick, picked, highlight = [], pulse, problems, risk = null, focus = null,
+    positions = null,
+  }: Props,
 ) {
   const container = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
   // Elements are rebuilt on every state change, so handlers read the latest values.
   const onClick = useRef(onSegmentClick);
   onClick.current = onSegmentClick;
+  const onSwitch = useRef(onSwitchClick);
+  onSwitch.current = onSwitchClick;
   const latest = useRef(state);
   latest.current = state;
   const latestRisk = useRef(risk);
@@ -470,19 +489,23 @@ export default function FeederDiagram(
     });
     cy.current = graph;
     graph.on("tap", "edge.segment", (event) => onClick.current?.(event.target.data("ref")));
-    graph.on("mouseover", "edge.segment", (event) => {
-      if (!onClick.current) return;
-      event.target.addClass("hover");
-      container.current!.style.cursor = "pointer";
-    });
-    graph.on("mouseout", "edge.segment", (event) => {
-      event.target.removeClass("hover");
-      container.current!.style.cursor = "default";
-    });
+    graph.on("tap", "node.switch", (event) => onSwitch.current?.(event.target.data("ref")));
+    const handlerFor = (selector: string) => selector === "edge.segment" ? onClick : onSwitch;
+    for (const selector of ["edge.segment", "node.switch"]) {
+      graph.on("mouseover", selector, (event) => {
+        if (!handlerFor(selector).current) return;
+        event.target.addClass("hover");
+        container.current!.style.cursor = "pointer";
+      });
+      graph.on("mouseout", selector, (event) => {
+        event.target.removeClass("hover");
+        container.current!.style.cursor = "default";
+      });
+    }
     graph.on("mouseover", "node, edge[kind]", (event) => {
       const { x, y } = event.renderedPosition ?? event.target.renderedPosition();
       const info = describe(latest.current, event.target.data("kind"), event.target.data("ref"),
-        Boolean(onClick.current), latestRisk.current);
+        { lines: Boolean(onClick.current), switches: Boolean(onSwitch.current) }, latestRisk.current);
       setTooltip({ x, y, ...info });
     });
     graph.on("mouseout", "node, edge", () => setTooltip(null));
@@ -534,6 +557,14 @@ export default function FeederDiagram(
     }
     liveBefore.current = live;
   }, [state, positions]);
+
+  useEffect(() => {
+    const graph = cy.current;
+    if (!graph) return;
+    graph.elements(".picked").removeClass("picked");
+    for (const id of picked?.lines ?? []) graph.getElementById(`l${id}`).addClass("picked");
+    for (const id of picked?.switches ?? []) graph.getElementById(`s${id}`).addClass("picked");
+  }, [state, picked]);
 
   useEffect(() => {
     const graph = cy.current;

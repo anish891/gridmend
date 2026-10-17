@@ -36,16 +36,17 @@ path or lines it relied on on the map.
   minute or two per fault.
 
 Use the **network switch** in the top bar to move between the IEEE 33-bus test feeder and a real
-177-bus, two-substation 20 kV network (Oberrhein). Press **Play the demo**, pick a demo fault or
-click any line, and watch the agent work: the indicators it reads light up, its isolation replays
-on the map, and every restoration design it tries appears with the reason it failed or passed.
-**Two faults at once** includes a fault hidden behind another, which only shows when reclosing
-trips the breaker again. Approve the plan the agent recommends (or another that passed). After
-the main-line fault is restored, **Reconnect the solar plant** brings the 500 kW plant on the
-19-22 lateral back online and the agent plans a second stage. File a crew note such as "the
-sectionalizer between 6 and 7 is jammed shut" and fault 4-5 again to see the agent isolate around
-it. Switch the map to **Risk map** to see every line coloured by what a fault there would leave
-dark. The **Graph** tab shows the live Cypher behind every tool and what it returns right now.
+177-bus, two-substation 20 kV network (Oberrhein). Then **build what goes wrong**: click up to
+three lines on the map to fault them and any switches to make them jam, and trip the feeder, or
+start from a known incident such as a fault hidden behind another. Next to the map, **Agent
+decisions** fills in as the agent works: the indicators it read and the zone it declared, the
+isolation it tested and whether the breaker held, every restoration design it tried with the
+reason it failed or passed, and the plan it recommends, followed by its briefing. Approve the
+plan it recommends (or another that passed). The same side panel holds **Ask the grid** and the
+**Crew report**. After the main-line fault is restored, **Reconnect the solar plant** brings the
+500 kW plant on the 19-22 lateral back online and the agent plans a second stage. Switch the map
+to **Risk map** to see every line coloured by what a fault there would leave dark. The **Graph**
+tab shows the live Cypher behind every tool and what it returns right now.
 
 ![GridMend after a fault on 4-5: hospital and fire station re-fed through ties 8-21 and 9-15](docs/feeder.png)
 

@@ -242,6 +242,9 @@ async function call<T>(method: "GET" | "POST" | "DELETE", path: string, body?: u
 export const api = {
   state: () => call<GridState>("GET", "/state"),
   fault: (lines: string[]) => call<{ lines: string[]; indicators_set: string[] }>("POST", "/fault", { lines }),
+  // Scenario setup before a fault: a switch that will not operate.
+  jam: (switchId: string, jammed = true) =>
+    call<{ switch_id: string; jammed: boolean }>("POST", "/jam", { switch_id: switchId, jammed }),
   // tripped_again: the switching fed a fault after all, so the breaker opened again.
   execute: (planId: string) =>
     call<{ plan_id: string; ops: SwitchOp[]; tripped_again: boolean }>("POST", "/execute", { plan_id: planId }),

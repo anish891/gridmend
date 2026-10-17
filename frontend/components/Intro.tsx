@@ -12,11 +12,11 @@ export default function Intro() {
   return (
     <Card as="aside" className="intro" title="How it works">
       <ol className="how">
-        <li><b>Locate</b> the damaged section by following the tripped fault indicators.</li>
-        <li><b>Isolate</b> it, then turn the substation breaker back on so everything upstream returns.</li>
-        <li><b>Plan</b> backup routes into the sections that are still dark.</li>
-        <li><b>Check</b> every plan on a copy of the grid: no loops, no overloaded lines, voltage within limits.</li>
-        <li><b>Approve</b> a plan that passed. Every decision is recorded and explained.</li>
+        <li><b>Locate.</b> The agent reads the tripped fault indicators and decides where the fault is.</li>
+        <li><b>Isolate.</b> It writes the switching that cuts that section out and turns the breaker back on.</li>
+        <li><b>Design.</b> It plans backup routes into the sections still dark, and revises when one fails.</li>
+        <li><b>Check.</b> Every plan runs on a copy of the grid first: no loops, no overloads, voltage within limits.</li>
+        <li><b>Approve.</b> You approve the plan it recommends. Every decision is recorded and explained.</li>
       </ol>
       <details className="glossary">
         <summary>Key terms</summary>

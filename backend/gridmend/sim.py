@@ -32,6 +32,18 @@ def apply_faults(g: Graph, line_ids: list[str]) -> list[str]:
     return trip(g)
 
 
+def set_jammed(g: Graph, switch_id: str, jammed: bool) -> None:
+    """Scenario setup: a switch that will not operate, as if found on patrol before the fault."""
+    if g.ro_query("MATCH ()-[s:SEG {faulted: true}]->() RETURN count(s)").result_set[0][0]:
+        raise FaultError("set up jammed switches before the fault; reset first")
+    found = g.query(
+        "MATCH ()-[s:SW {id: $id}]->() SET s.operable = $operable, s.report = null RETURN s.id",
+        {"id": switch_id, "operable": not jammed},
+    ).result_set
+    if not found:
+        raise FaultError(f"{switch_id} is not a switch")
+
+
 def trip(g: Graph) -> list[str]:
     """Protection: if any faulted segment is energized, the breaker trips. Returns the switches
     whose indicators saw fault current, or nothing when no fault is energized."""
