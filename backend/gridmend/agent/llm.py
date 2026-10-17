@@ -12,9 +12,14 @@ def make_client(settings: Settings | None = None) -> tuple[OpenAI, str]:
     return client, settings.llm_model
 
 
+# Qwen-style models wrap their thinking in <think>, gpt-oss on Bedrock in <reasoning>.
+REASONING_BLOCK = re.compile(r"<(think|reasoning)>.*?</\1>", re.DOTALL)
+# A block the model opened and never closed, so where its answer starts is unknown.
+UNCLOSED_REASONING = re.compile(r"</?(think|reasoning)>")
+
+
 def strip_reasoning(text: str | None) -> str:
-    # Qwen-style models wrap their thinking in <think>, gpt-oss on Bedrock in <reasoning>.
-    return re.sub(r"<(think|reasoning)>.*?</\1>", "", text or "", flags=re.DOTALL).strip()
+    return REASONING_BLOCK.sub("", text or "").strip()
 
 
 def parse_json_object(text: str) -> dict:

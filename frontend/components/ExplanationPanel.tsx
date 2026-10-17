@@ -157,7 +157,8 @@ export default function ExplanationPanel({ e, onPath = () => {} }: Props) {
               <ul className="rejected-list">
                 {e.rejected.map((r) => (
                   <li key={r.id}>
-                    <b>{r.id}</b> <span className="muted">{r.ops.join(", ")}</span>
+                    <b>{r.id}</b>{r.origin === "agent" && <span className="muted"> (agent&apos;s design)</span>}{" "}
+                    <span className="muted">{r.ops.join(", ")}</span>
                     {r.violations.map((v) => <div key={v} className="small violation">{v}</div>)}
                   </li>
                 ))}

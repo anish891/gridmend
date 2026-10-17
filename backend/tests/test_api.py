@@ -100,14 +100,16 @@ class ScriptedAdvisor:
     def create(self, model, messages, tools, temperature):
         self.offered = [t["function"]["name"] for t in tools]
         results = [json.loads(m["content"]) for m in messages if m["role"] == "tool"]
-        script = ["locate_fault", "isolation_plan", "restoration_candidates"]
+        script = [("locate_fault", {}), ("isolation_plan", {}),
+                  ("verify_plan", {"close": ["8-21"], "open": ["9-10"]}),
+                  ("restoration_candidates", {})]
         if len(results) < len(script):
-            return self.call(script[len(results)], {})
-        candidates = results[2]["candidates"]
-        verified = results[3:3 + len(candidates)]
+            return self.call(*script[len(results)])
+        candidates = results[3]["candidates"]
+        verified = results[4:4 + len(candidates)]
         if len(verified) < len(candidates):
             return self.call("verify_plan", {"rank": len(verified) + 1})
-        if len(results) == 3 + len(candidates):
+        if len(results) == 4 + len(candidates):
             best = max((v for v in verified if v["passed"]),
                        key=lambda v: (len(v["critical_loads_restored"]), v["restored_kw"]))
             return self.call("recommend_plan", {"plan_id": best["plan_id"],
@@ -158,8 +160,8 @@ def test_agent_advises_and_the_operator_executes(client, agent):
     events = stream_events(client)
 
     assert "execute_plan" not in agent.offered
-    assert [e["name"] for e in events if e["type"] == "tool"][:3] == [
-        "locate_fault", "isolation_plan", "restoration_candidates"]
+    assert [e["name"] for e in events if e["type"] == "tool"][:4] == [
+        "locate_fault", "isolation_plan", "verify_plan", "restoration_candidates"]
     assert events[-1] == {"type": "final", "text": "Recommend it.", "model": "scripted"}
     assert client.get("/state").json()["served_kw"] == pytest.approx(460)
 
@@ -169,6 +171,8 @@ def test_agent_advises_and_the_operator_executes(client, agent):
     assert recommended["recommendation"] == "restores the hospital and fire station"
     assert all(set(p) >= {"ops", "violations", "restored_zones", "dropped_zones", "critical"}
                for p in plans["candidates"])
+    origins = [p["origin"] for p in plans["candidates"]]
+    assert origins[0] == "agent" and set(origins[1:]) <= {"greedy", "tie-only", "repaired"}
     assert client.post("/execute", json={"plan_id": plans["recommended"]}).status_code == 200
     assert client.get("/state").json()["served_kw"] == pytest.approx(1310)
 
@@ -283,7 +287,7 @@ def test_questions_are_answered_from_the_graph_with_read_only_tools(client, aske
     events = ask(client, "How is the hospital fed?")
 
     assert asker.question == "How is the hospital fed?"
-    assert set(asker.offered) == {"field_reports", "grid_status", "line_dependencies",
+    assert set(asker.offered) == {"field_reports", "grid_status", "zone_map", "line_dependencies",
                                   "transfer_capacity", "what_if", "fault_impact", "feeding_path",
                                   "explain_plan"}
     tool = events[0]

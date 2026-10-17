@@ -72,15 +72,16 @@ of the field arrives as crew notes, not as clean data.
 |---|---|---|
 | Locate | Follow the chain of tripped fault indicators from the substation | Zone whose upstream indicator is set and downstream ones are clear |
 | Isolate | Open the faulted zone's boundary switches, reclose the breaker; a zone tied to the fault by a jammed switch is cut out with it | Switches with exactly one end in the isolated region; traversal across jammed closed switches |
-| Plan | Build candidate restoration plans from the switches that can still operate | What-if energization, radiality and line loading for each tie subset |
-| Verify | Apply each candidate to `GRAPH.COPY` of the live graph and check operability, isolation, connectivity, radiality, capacity and voltage | A fork per plan; power flow on the forked configuration |
+| Plan | The agent designs switching plans from the zone map and revises them on the verifier's violations; graph searches generate candidates to cross-check its designs, or to plan alone without an LLM | Zones and the switches that join them; what-if energization, radiality and line loading for each tie subset |
+| Verify | Apply each plan to `GRAPH.COPY` of the live graph and check operability, isolation, connectivity, radiality, capacity and voltage | A fork per plan; power flow on the forked configuration |
 | Decide | Rank verified plans by the critical sites they restore, then load restored, then fewest operations | `RESTORES` edges from each plan to zones, critical weights on buses |
 | Act | Execute the approved plan on the live graph | Only plans whose status is `verified` |
 | Explain | Feeding path of every restored zone, margins, rejected alternatives, why each critical site is lit or dark, the crew reports in force, and a numbered switching order | Stored decision trace |
 
-The LLM never writes Cypher and never flips a switch. As the operator agent it calls fourteen
-tools, chooses among plans that already passed verification, and explains the choice using only
-facts the tools returned. As a reader it turns crew notes into structured values that code
+The LLM never writes Cypher and never flips a switch. As the operator agent it calls fifteen
+tools, designs its own restoration plans, revises them until the fork verifier passes them,
+compares them with generated plans, and explains the choice using only facts the tools
+returned. As a reader it turns crew notes into structured values that code
 validates before writing. All writes to the graph are deterministic code.
 
 ### Example: fault on line 4-5 (zone Z3)
@@ -110,10 +111,16 @@ The LLM is the operator's assistant, not the controller. It has two jobs, and ea
 at a deterministic check.
 
 * **Operator agent.** It decides which tools to call and in what order: field reports, locate,
-  isolate, candidates, which candidates to verify, what-ifs. It chooses among verified plans
-  (most critical sites restored, then most load, then fewest switch operations) and justifies
-  the choice. `recommend_plan` refuses a plan that did not pass verification, and the choice
-  and reason are written into the decision trace.
+  isolate, then design. From `zone_map` (dark zones, their load and critical sites, and the
+  switches that join zones) it proposes which ties to close and which sectionalizers to open,
+  and sends each design to `verify_plan`. A failed check comes back as a violation (a loop, an
+  overload on 2-19 with its loading, buses below 0.90 pu) and the agent revises against it.
+  Only after it has verified a design of its own does `restoration_candidates` hand it the
+  generated plans to compare. It chooses among verified plans, its own or generated (most
+  critical sites restored, then most load, then fewest switch operations), and justifies the
+  choice. `recommend_plan` refuses a plan that did not pass verification, and every design,
+  the choice and the reason are written into the decision trace, each plan marked with who
+  designed it.
 * **Crew-note reader.** From a crew's free-text note it lists the switches the note says are
   jammed or repaired, with the evidence. Code accepts a finding only if the switch exists, the
   evidence is quoted from the note itself, and any position the note states matches the twin.
@@ -174,9 +181,10 @@ deleted after a what-if).
 (:Incident {id, ts, fault_line, status})-[:FAULT_IN]->(:Zone)
 (:Incident)-[:HAS_REPORT]->(:CrewReport)
 (:Incident)-[:CUTS_OFF {via}]->(:Zone)                    healthy zone isolated with the fault
-(:Incident)-[:HAS_PLAN]->(:Plan {id, kind, status, switch_ops, restored_kw, restored_weighted,
+(:Incident)-[:HAS_PLAN]->(:Plan {id, kind, status, origin, switch_ops, restored_kw, restored_weighted,
                                  min_v_pu, max_loading_pct, recommended, recommendation})
         kind: isolation | restoration     status: verified | rejected | executed
+        origin: agent | greedy | tie-only | repaired | manual    (who designed it)
 (:Plan)-[:STEP]->(:SwitchOp {seq, switch_id, op})
 (:Plan)-[:VIOLATES]->(:Violation {type, detail})
 (:Plan)-[:RESTORES]->(:Zone)
@@ -398,7 +406,7 @@ Where each part lives:
 gridmend.grid   load, zones, energization (case data -> graph)
 gridmend.flisr  locate, isolate, candidates, verify (+ pandapower), execute, explain, trace,
                 transfer (max flow), crew reports, what-if
-gridmend.agent  14 tools --+-- LLM operator loop and Ask the grid (any OpenAI-compatible endpoint)
+gridmend.agent  15 tools --+-- LLM operator loop and Ask the grid (any OpenAI-compatible endpoint)
                            +-- MCP server (stdio)
 gridmend.api    HTTP API --+-- Next.js + Cytoscape UI
 eval            scenario runner, baselines, networkx/pandapower oracle
@@ -460,9 +468,10 @@ Then:
 * `gridmend agent 4-5` lets the agent work the incident through the tools and asks for your
   approval before it executes a plan.
 * In the web UI, the top of the Feeder page offers **Rules / AI operator agent**. In agent
-  mode the agent reads the field reports, locates, isolates, asks for candidates, verifies each on a
-  fork and calls `recommend_plan`, while every tool call streams into an agent log and replays on
-  the diagram. It never gets the execute tool: its pick and its reason are stored on the Plan
+  mode the agent reads the field reports, locates, isolates, designs a plan from the zone map,
+  tests it on a fork and revises it until it passes, compares it with the generated candidates
+  and calls `recommend_plan`, while every tool call streams into an agent log and replays on
+  the diagram. The plan list marks which plans the agent designed. It never gets the execute tool: its pick and its reason are stored on the Plan
   node, and you approve and execute with the usual button. One model call at a time across all
   visitors, with `AGENT_COOLDOWN_S` (default 30) between agent runs.
 * The **Field crew report** panel files a crew's note at any time. Before a fault it shapes
@@ -472,7 +481,7 @@ Then:
 
 ### MCP
 
-`gridmend mcp` serves the same fourteen tools over stdio, so any MCP client can locate, plan,
+`gridmend mcp` serves the same fifteen tools over stdio, so any MCP client can locate, plan,
 verify and explain on the live twin. To browse and call them interactively:
 
 ```bash
@@ -499,8 +508,9 @@ path from `which gridmend`, and start FalkorDB first):
 ```
 
 A good first session: fault a line with `gridmend fault 4-5`, then ask the client to restore
-service. It will typically call `locate_fault`, `isolation_plan`, `restoration_candidates`, then
-`verify_plan` for each candidate, and the client's own tool approval stands in for the operator's
+service. It will typically call `locate_fault`, `isolation_plan` and `zone_map`, send its own
+designs to `verify_plan`, then compare them with `restoration_candidates`, and the client's own
+tool approval stands in for the operator's
 approval of `execute_plan`.
 
 | Tool | Returns |
@@ -509,10 +519,11 @@ approval of `execute_plan`.
 | `grid_status` | energized and dark zones, switch states (including jammed), load served |
 | `line_dependencies` | per line: buses, load and critical facilities downstream |
 | `locate_fault` | faulted zone and indicator evidence chain |
+| `zone_map` | every zone's state, load and critical sites, and every switch with its rating and the zones it joins |
 | `isolation_plan` | switch operations performed, zones cut out with the fault |
-| `restoration_candidates` | ranked candidate plans |
+| `restoration_candidates` | ranked generated plans, once the agent has verified a design of its own |
 | `transfer_capacity` | max-flow bound on what any switching could restore, and the lines that limit it |
-| `verify_plan` | pass or fail, metrics, violations (by rank or explicit switches) |
+| `verify_plan` | pass or fail, metrics, violations, and who designed the plan (explicit switches or a candidate rank) |
 | `what_if` | best safe outcome with and without given switches jammed, on copies of the grid |
 | `recommend_plan` | records the chosen verified plan and the reason in the trace |
 | `execute_plan` | applies a verified plan |

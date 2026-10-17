@@ -150,10 +150,15 @@ export default function Home() {
       await replay(ops);
       await refresh();
       setTrace(await api.trace());
+    } else if (event.name === "zone_map") {
+      working(STEP.verify, "The agent is designing a restoration plan from the zone map");
     } else if (event.name === "restoration_candidates") {
-      working(STEP.verify, `The agent got ${result.candidates.length} candidates and is verifying them on forks`);
+      working(STEP.verify, `The agent is checking its design against ${result.candidates.length} generated plans`);
     } else if (event.name === "verify_plan") {
-      working(STEP.verify, `The agent verified ${result.plan_id} on a fork: ${result.passed ? "passed" : "rejected"}`);
+      const own = result.designed_by === "agent";
+      // Show which switches the agent's own design closes.
+      if (own) flash((event.args.close as string[] | undefined) ?? [], "close");
+      working(STEP.verify, `The agent tested ${own ? "its own design" : "generated plan"} ${result.plan_id} on a fork: ${result.passed ? "passed" : own ? "rejected, revising" : "rejected"}`);
       setTrace(await api.trace());
     } else if (event.name === "recommend_plan") {
       working(STEP.verify, `The agent recommends ${result.recommended} and is writing its explanation`);

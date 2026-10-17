@@ -201,6 +201,7 @@ def verify_plan(
     plan_id: str,
     ops: list[SwitchOp],
     claims: list[int] | None = None,
+    origin: str = "manual",
 ) -> VerifyResult:
     """Apply the plan to a copy of the live graph, check it there, and record the outcome on live."""
     result = VerifyResult(plan_id, ops, claims if claims is not None else tie_claims(live, ops))
@@ -231,7 +232,7 @@ def verify_plan(
         fork.delete()
 
     record_plan(live, incident_id, plan_id, "restoration",
-                "verified" if result.passed else "rejected", ops)
+                "verified" if result.passed else "rejected", ops, origin)
     record_verification(live, result)
     return result
 

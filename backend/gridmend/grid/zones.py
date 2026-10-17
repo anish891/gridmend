@@ -85,3 +85,46 @@ def zone_table(g: Graph) -> list[dict]:
             zones[down]["upstream"].append(switch_id)
 
     return [zones[zid] for zid in sorted(zones)]
+
+
+def zone_state(energized: bool, faulted: bool, cut_off: bool) -> str:
+    if faulted:
+        return "faulted"
+    if cut_off:
+        return "cut off with the fault"
+    return "live" if energized else "dark"
+
+
+def zone_map(g: Graph) -> dict:
+    """The feeder at the level an operator switches it: each zone with its load and state, and
+    each switch with the zones it joins. A breaker joins a substation to its first zone."""
+    critical: dict[int, list[str]] = {}
+    for zid, facility in g.ro_query(
+        "MATCH (b:Bus {critical: true}) RETURN b.zone, b.facility ORDER BY b.id"
+    ).result_set:
+        critical.setdefault(zid, []).append(facility)
+    zones = [
+        {"zone": f"Z{zid}", "state": zone_state(energized, faulted, cut_off),
+         "kw": round(p_kw), "kva": round(kva), "critical": critical.get(zid, [])}
+        for zid, energized, faulted, cut_off, p_kw, kva in g.ro_query(
+            """
+            MATCH (b:Bus)-[:IN_ZONE]->(z:Zone)
+            RETURN z.id, z.energized, z.faulted, coalesce(z.cut_off, false), z.p_kw, sum(b.s_kva)
+            ORDER BY z.id
+            """
+        ).result_set
+    ]
+    switches = [
+        {"id": switch_id, "kind": kind, "status": status, "cap_kva": round(cap),
+         "joins": [f"Z{a}" if a is not None else "substation", f"Z{b}"],
+         **({"jammed": True} if operable is False else {})}
+        for switch_id, kind, status, operable, cap, a, b in g.ro_query(
+            """
+            MATCH (x:Bus)-[s:SW]->(y:Bus)-[:IN_ZONE]->(zb:Zone)
+            OPTIONAL MATCH (x)-[:IN_ZONE]->(za:Zone)
+            RETURN s.id, s.kind, s.status, s.operable, s.cap_kva, za.id, zb.id
+            ORDER BY s.kind, s.id
+            """
+        ).result_set
+    ]
+    return {"zones": zones, "switches": switches}

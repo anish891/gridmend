@@ -255,6 +255,7 @@ def plan_restoration(
     verified = []
     for candidate in generate_candidates(g)[:TOP_N]:
         plan_id = next_plan_id(g, incident_id, prefix)
-        result = verify_plan(db, g, incident_id, plan_id, list(candidate.ops), list(candidate.claims))
+        result = verify_plan(db, g, incident_id, plan_id, list(candidate.ops),
+                             list(candidate.claims), candidate.origin)
         verified.append((candidate, result))
     return verified

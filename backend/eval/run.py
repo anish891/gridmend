@@ -68,7 +68,7 @@ def score_unverified(db: FalkorDB, g: Graph, incident_id: str, line: str, method
     what it would have caught. Unsafe switching restores nothing: protection would trip it."""
     if not ops:
         return Row(line, method, 0.0, 0, 0, 0, plan_ms)
-    result = verify_plan(db, g, incident_id, f"{incident_id}-{method}", ops)
+    result = verify_plan(db, g, incident_id, f"{incident_id}-{method}", ops, origin=method)
     safe = result.passed
     return Row(
         fault=line,

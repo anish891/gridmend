@@ -33,7 +33,7 @@
 
   <rect class="box llm" x="660" y="28" width="260" height="70" rx="10"/>
   <text class="title" x="676" y="56">LLM (OpenAI-compatible)</text>
-  <text class="small" x="676" y="78">chooses tools, picks among verified plans</text>
+  <text class="small" x="676" y="78">designs plans, revises on violations</text>
 
   <!-- Row 2: entry points -->
   <rect class="box" x="40" y="148" width="260" height="62" rx="10"/>
@@ -42,7 +42,7 @@
 
   <rect class="box" x="350" y="148" width="260" height="62" rx="10"/>
   <text class="title" x="366" y="174">MCP server</text>
-  <text class="small" x="366" y="194">stdio, 14 tools</text>
+  <text class="small" x="366" y="194">stdio, 15 tools</text>
 
   <rect class="box llm" x="660" y="148" width="260" height="62" rx="10"/>
   <text class="title" x="676" y="174">Agent loop</text>
@@ -59,7 +59,7 @@
   <!-- Row 3: tools -->
   <rect class="box llm" x="40" y="260" width="880" height="94" rx="10"/>
   <text class="title" x="56" y="287">Agent tools: the LLM's only way to touch the grid</text>
-  <text class="mono" x="56" y="310">field_reports · grid_status · line_dependencies · locate_fault · isolation_plan</text>
+  <text class="mono" x="56" y="310">field_reports · grid_status · zone_map · line_dependencies · locate_fault · isolation_plan</text>
   <text class="mono" x="56" y="327">restoration_candidates · transfer_capacity · verify_plan · what_if · fault_impact</text>
   <text class="mono" x="56" y="344">feeding_path · recommend_plan · execute_plan (only after operator approval) · explain_plan</text>
 

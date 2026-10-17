@@ -22,11 +22,19 @@ export function describe(e: ToolEvent): { label: string; detail: string; bad?: b
         label: "Computed the transfer limit",
         detail: `${r.deliverable_kva} of ${r.demand_kva} kVA deliverable${r.bottlenecks.length ? `, limited by ${r.bottlenecks.join(", ")}` : ""}`,
       };
+    case "zone_map":
+      return {
+        label: "Read the zone map",
+        detail: `${r.zones.filter((z: { state: string }) => z.state === "dark").length} healthy zones dark`,
+      };
     case "restoration_candidates":
-      return { label: "Asked for candidates", detail: `${r.candidates.length} ranked plans` };
+      return { label: "Asked for generated plans to compare", detail: `${r.candidates.length} ranked plans` };
     case "verify_plan": {
       const verdict = r.passed ? "passed" : `rejected (${r.violations.map((v: string) => v.split(":")[0]).join(", ")})`;
-      return { label: `Verified ${r.plan_id} on a fork`, detail: `${verdict}, ${r.restored_kw} kW`, bad: !r.passed };
+      const label = r.designed_by === "agent"
+        ? `Tested its own design ${r.plan_id} on a fork`
+        : `Verified generated ${r.plan_id} on a fork`;
+      return { label, detail: `${verdict}, ${r.restored_kw} kW`, bad: !r.passed };
     }
     case "recommend_plan":
       return { label: `Recommended ${r.recommended}`, detail: String(e.args.reason ?? "") };

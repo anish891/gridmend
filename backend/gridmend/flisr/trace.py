@@ -66,12 +66,13 @@ def set_incident_status(g: Graph, incident_id: str, status: str) -> None:
 
 
 def record_plan(
-    g: Graph, incident_id: str, plan_id: str, kind: str, status: str, ops: list[SwitchOp]
+    g: Graph, incident_id: str, plan_id: str, kind: str, status: str, ops: list[SwitchOp],
+    origin: str | None = None,
 ) -> None:
     g.query(
         """
         MATCH (i:Incident {id: $incident})
-        CREATE (i)-[:HAS_PLAN]->(p:Plan {id: $id, kind: $kind, status: $status,
+        CREATE (i)-[:HAS_PLAN]->(p:Plan {id: $id, kind: $kind, status: $status, origin: $origin,
                                          switch_ops: size($ops)})
         WITH p
         UNWIND range(0, size($ops) - 1) AS seq
@@ -83,6 +84,7 @@ def record_plan(
             "id": plan_id,
             "kind": kind,
             "status": status,
+            "origin": origin,
             "ops": [{"switch_id": o.switch_id, "op": o.op} for o in ops],
         },
     )
@@ -107,13 +109,13 @@ def plan_details(g: Graph, incident_id: str) -> list[dict]:
     params = {"id": incident_id}
     scope = "MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {kind: 'restoration'})"
     plans = {
-        plan_id: {"plan_id": plan_id, "status": status, "restored_kw": kw or 0.0, "min_v_pu": min_v,
-                  "max_loading_pct": loading, "recommended": bool(recommended),
-                  "recommendation": reason, "ops": [], "violations": [], "restored_zones": [],
-                  "critical": []}
-        for plan_id, status, kw, min_v, loading, recommended, reason in g.ro_query(
+        plan_id: {"plan_id": plan_id, "origin": origin, "status": status,
+                  "restored_kw": kw or 0.0, "min_v_pu": min_v, "max_loading_pct": loading,
+                  "recommended": bool(recommended), "recommendation": reason, "ops": [],
+                  "violations": [], "restored_zones": [], "critical": []}
+        for plan_id, origin, status, kw, min_v, loading, recommended, reason in g.ro_query(
             scope + """
-            RETURN p.id, p.status, p.restored_kw, p.min_v_pu, p.max_loading_pct,
+            RETURN p.id, p.origin, p.status, p.restored_kw, p.min_v_pu, p.max_loading_pct,
                    p.recommended, p.recommendation
             """, params).result_set
     }

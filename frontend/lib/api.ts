@@ -92,7 +92,8 @@ export type Violation = { type: string; detail: string };
 
 export type Candidate = {
   plan_id: string;
-  origin: "greedy" | "tie-only" | "repaired" | "agent";
+  // Who designed the plan: one of the generators, the agent, or an operator at the CLI.
+  origin: "greedy" | "tie-only" | "repaired" | "agent" | "manual" | null;
   score: number;
   ops: SwitchOp[];
   passed: boolean;
@@ -135,7 +136,7 @@ export type Explanation = {
     max_loading_pct: number;
     paths: Record<string, string[]>;
   } | null;
-  rejected: { id: string; ops: string[]; violations: string[] }[];
+  rejected: { id: string; origin: Candidate["origin"]; ops: string[]; violations: string[] }[];
   transfer: { demand_kva: number; deliverable_kva: number; shortfall_kva: number; bottlenecks: string[] };
   critical: CriticalLoad[];
   crew_reports: CrewReport[];

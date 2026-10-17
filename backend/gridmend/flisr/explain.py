@@ -54,13 +54,14 @@ def rejected_plans(g: Graph, incident_id: str) -> list[dict]:
     rows = g.ro_query(
         """
         MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {status: 'rejected'})-[:VIOLATES]->(v)
-        RETURN p.id, collect(v.type + ': ' + v.detail)
+        RETURN p.id, p.origin, collect(v.type + ': ' + v.detail)
         ORDER BY p.id
         """,
         {"id": incident_id},
     ).result_set
-    return [{"id": plan_id, "ops": plan_steps(g, plan_id), "violations": violations}
-            for plan_id, violations in rows]
+    return [{"id": plan_id, "origin": origin, "ops": plan_steps(g, plan_id),
+             "violations": violations}
+            for plan_id, origin, violations in rows]
 
 
 def why_dark(g: Graph, incident_id: str, zone: int, faulted: bool) -> str:

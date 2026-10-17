@@ -46,6 +46,11 @@ def locate_fault() -> dict:
     return tools().call("locate_fault", {})
 
 
+@server.tool(description=DESCRIPTIONS["zone_map"])
+def zone_map() -> dict:
+    return tools().call("zone_map", {})
+
+
 @server.tool(description=DESCRIPTIONS["isolation_plan"])
 def isolation_plan() -> dict:
     return tools().call("isolation_plan", {})

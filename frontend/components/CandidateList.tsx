@@ -17,7 +17,8 @@ const ORIGIN = {
   greedy: "Quick fix: close a backup switch into every dark section",
   "tie-only": "One backup switch, nothing else opened",
   repaired: "Backup switches plus openings that avoid loops and overloads",
-  agent: "Checked at the AI operator agent's request",
+  agent: "Designed by the AI operator agent",
+  manual: "Entered by hand",
 };
 
 // The verifier's check names, in the operator's words.
@@ -110,7 +111,7 @@ export default function CandidateList(props: Props) {
                 </Term>
               </span>
             </div>
-            <div className="muted small">{ORIGIN[c.origin]}</div>
+            <div className="muted small">{c.origin && ORIGIN[c.origin]}</div>
             {c.recommendation && (
               <div className="agent-reason">
                 <Badge tone="accent" solid>agent</Badge> {c.recommendation}

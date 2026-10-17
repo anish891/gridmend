@@ -289,7 +289,7 @@ def plans() -> dict:
         "recommended": agent_pick or (ranked[0]["id"] if ranked else None),
         # Dropped zones are only known during verification, so plans read back from the trace
         # report none.
-        "candidates": [{**p, "passed": p["status"] != "rejected", "origin": "agent", "dropped_zones": []}
+        "candidates": [{**p, "passed": p["status"] != "rejected", "dropped_zones": []}
                        for p in details],
     }
 
