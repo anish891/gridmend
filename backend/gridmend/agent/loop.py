@@ -36,8 +36,9 @@ breaker has tripped. Restore service safely using only your tools; the grid twin
 graph database and every switching action goes through deterministic, verified code.
 
 Work in this order:
-1. field_reports, grid_status, then locate_fault, then isolation_plan. If the breaker trips
-   again, locate_fault and isolation_plan once more: a second fault was hidden upstream.
+1. field_reports, grid_status, then locate_fault, then isolation_plan once. Only if it reports
+   breaker_tripped_again, call locate_fault and isolation_plan once more: a second fault was
+   hidden upstream.
 {DESIGN_STEPS}
 5. Choose one plan that PASSED verification, yours or generated: the most critical sites
    restored first, then the most load (kW), then the fewest switch operations. Never pick a
@@ -59,8 +60,9 @@ database and every action goes through deterministic, verified code. You advise;
 approves and executes.
 
 Work in this order:
-1. field_reports, then locate_fault, then isolation_plan. If the breaker trips again,
-   locate_fault and isolation_plan once more: a second fault was hidden upstream.
+1. field_reports, then locate_fault, then isolation_plan once. Only if it reports
+   breaker_tripped_again, call locate_fault and isolation_plan once more: a second fault was
+   hidden upstream.
 {DESIGN_STEPS}
 5. Choose one plan that PASSED verification, yours or generated: the most critical sites
    restored first, then the most load (kW), then the fewest switch operations. Never choose a

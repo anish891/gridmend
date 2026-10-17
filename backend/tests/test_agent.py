@@ -157,6 +157,16 @@ def test_a_declined_plan_is_not_pushed_again(falkordb, graph):
     assert tools.unfinished() is None
 
 
+def test_isolating_again_reports_the_isolation_already_done(falkordb, graph):
+    apply_fault(graph, "4-5")
+    tools = GridTools(falkordb, graph, approve=lambda plan: True)
+    tools.locate_fault()
+    first = tools.call("isolation_plan", {})
+    again = tools.call("isolation_plan", {})
+    assert again["already_isolated"] and again["executed"] == first["executed"]
+    assert grid_status(graph)["energized_zones"] == [2, 19]
+
+
 def test_generated_candidates_wait_for_the_agents_own_design(falkordb, graph):
     apply_fault(graph, "4-5")
     tools = GridTools(falkordb, graph, approve=lambda plan: True)

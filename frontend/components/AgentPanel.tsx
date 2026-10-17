@@ -14,7 +14,9 @@ export function describe(e: ToolEvent): { label: string; detail: string; bad?: b
     case "locate_fault":
       return { label: "Located the fault", detail: `Z${r.faulted_zone} via ${r.indicator_chain.join(" → ")}` };
     case "isolation_plan":
-      return { label: "Isolated it", detail: r.executed.join(", ") };
+      return r.already_isolated
+        ? { label: "Checked isolation", detail: "already isolated, the breaker held" }
+        : { label: "Isolated it", detail: r.executed.join(", ") };
     case "line_dependencies":
       return { label: "Checked what depends on each line", detail: `${r.lines.length} lines` };
     case "transfer_capacity":

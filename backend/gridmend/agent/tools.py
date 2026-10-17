@@ -5,9 +5,9 @@ from falkordb import FalkorDB, Graph
 from gridmend.flisr.candidates import Candidate, generate_candidates
 from gridmend.flisr.crew import crew_reports, jammed_switches
 from gridmend.flisr.execute import ExecuteError, execute_plan, verified_plans
-from gridmend.flisr.explain import explain_incident, feeding_path
+from gridmend.flisr.explain import explain_incident, feeding_path, plan_steps
 from gridmend.flisr.generation import generation_status
-from gridmend.flisr.isolate import IsolateError, isolate
+from gridmend.flisr.isolate import IsolateError, isolate, isolation_plans
 from gridmend.flisr.locate import LocateError, locate_fault
 from gridmend.flisr.transfer import transfer_limit
 from gridmend.flisr.trace import SwitchOp, open_incident
@@ -194,6 +194,14 @@ class GridTools:
                 "indicator_chains": {f"Z{z}": chain for z, chain in location.chains.items()}}
 
     def isolation_plan(self) -> dict:
+        incident = open_incident(self.g)
+        # Models often isolate again to be safe; answer with what was done instead of failing.
+        if incident and incident["status"] == "isolated":
+            return {"incident": incident["id"], "already_isolated": True,
+                    "executed": [step for plan_id in isolation_plans(self.g, incident["id"])
+                                 for step in plan_steps(self.g, plan_id)],
+                    "next": "The breaker held, so isolation is complete. Do not isolate again: "
+                            "design restoration from zone_map."}
         incident_id, ops = isolate(self.g)
         cut_off = self.g.ro_query(
             "MATCH (:Incident {id: $id})-[c:CUTS_OFF]->(z:Zone) RETURN z.id, c.via ORDER BY z.id",

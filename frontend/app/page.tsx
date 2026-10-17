@@ -139,7 +139,7 @@ export default function Home() {
         await pause(600);
       }
       await refresh();
-    } else if (event.name === "isolation_plan") {
+    } else if (event.name === "isolation_plan" && !result.already_isolated) {
       working(STEP.isolate, result.breaker_tripped_again
         ? "The breaker tripped again on reclosing: the agent is looking for a hidden second fault"
         : "The agent isolated the faulted zone");
