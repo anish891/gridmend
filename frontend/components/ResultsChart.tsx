@@ -29,8 +29,10 @@ export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
     return <EmptyState title="Nothing to chart">No fault leaves restorable load.</EmptyState>;
   }
 
-  const step = tickStep(Math.max(...rows.map((r) => r.optimal_kw)));
-  const top = Math.ceil(Math.max(...rows.map((r) => r.optimal_kw)) / step) * step;
+  const shown = rows.filter((r) => faults.includes(r.fault));
+  const highest = Math.max(...shown.map((r) => Math.max(r.optimal_kw, r.claimed_kw ?? 0)));
+  const step = tickStep(highest);
+  const top = Math.ceil(highest / step) * step;
   const ticks = Array.from({ length: top / step + 1 }, (_, i) => i * step);
   const plotW = WIDTH - PAD.left - PAD.right;
   const plotH = HEIGHT - PAD.top - PAD.bottom;
@@ -57,8 +59,23 @@ export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
                 const row = rows.find((r) => r.fault === fault && r.method === method);
                 if (!row) return null;
                 const x = x0 + j * barW;
+                // An unsafe plan scores 0; the faded bar shows the load it claimed to restore.
+                const claimed = row.violations > 0 ? row.claimed_kw ?? 0 : 0;
                 return (
                   <g key={method}>
+                    {claimed > 0 && (
+                      <rect
+                        x={x + 0.5}
+                        y={y(claimed)}
+                        width={barW - 3}
+                        height={y(0) - y(claimed)}
+                        rx={2}
+                        className="claimed-bar"
+                        style={{ fill: METHOD_COLORS[method], stroke: METHOD_COLORS[method] }}
+                      >
+                        <title>{`${methodLabel(method)}: claimed ${Math.round(claimed)} kW, but broke ${row.violations} safety rule${row.violations === 1 ? "" : "s"}, so it restores nothing`}</title>
+                      </rect>
+                    )}
                     <rect
                       x={x}
                       y={y(row.restored_kw)}
@@ -70,7 +87,7 @@ export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
                       <title>{`${methodLabel(method)}: ${Math.round(row.restored_kw)} kW, ${row.violations} violations`}</title>
                     </rect>
                     {row.violations > 0 && (
-                      <text x={x + barW / 2} y={y(0) - 4} textAnchor="middle" fontSize="14" fontWeight="700"
+                      <text x={x + barW / 2} y={(claimed > 0 ? y(claimed) : y(0)) - 4} textAnchor="middle" fontSize="14" fontWeight="700"
                         style={{ fill: "var(--faulted)" }}>
                         ×
                       </text>
@@ -94,6 +111,9 @@ export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
         ))}
         <span>
           <span style={{ color: "var(--faulted)", fontWeight: 700 }}>×</span> unsafe plan, counts as nothing restored
+        </span>
+        <span>
+          <span className="swatch claimed-swatch" /> faded: the load it claimed before the safety check
         </span>
       </figcaption>
     </figure>

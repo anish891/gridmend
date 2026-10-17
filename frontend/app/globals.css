@@ -700,6 +700,41 @@ button:disabled {
 
 .step-label { white-space: nowrap; }
 
+a.step-label {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 3px;
+}
+
+a.step-label:hover { text-decoration-color: currentColor; }
+
+.stepper,
+.card { scroll-margin-top: 12px; }
+
+.hero-demo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.paths li {
+  cursor: default;
+  border-radius: 6px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+}
+
+.paths li:hover,
+.paths li:focus-visible {
+  background: var(--close-soft);
+  outline: none;
+}
+
+.loading-card p { margin: var(--space-2) 0 0; }
+
 .step-text {
   display: flex;
   align-items: center;
@@ -1447,6 +1482,18 @@ td.bad { color: var(--faulted-text); }
 tr.quiet td:not(.bad) { color: var(--muted); }
 
 .chart { margin: 0; }
+
+.claimed-bar {
+  fill-opacity: 0.22;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+.swatch.claimed-swatch {
+  border-radius: 2px;
+  background: transparent;
+  border: 1.5px dashed var(--muted);
+}
 
 .chart svg {
   width: 100%;

@@ -57,9 +57,11 @@ function SwitchingOrder({ e }: { e: Explanation }) {
   );
 }
 
-export default function ExplanationPanel({ e }: { e: Explanation }) {
+type Props = { e: Explanation; onPath?: (zone: number | null) => void };
+
+export default function ExplanationPanel({ e, onPath = () => {} }: Props) {
   return (
-    <Card className="explanation" title="Explanation" hint="built from the decision trace stored in the graph">
+    <Card id="explanation" className="explanation" title="Explanation" hint="built from the decision trace stored in the graph">
       <div className="explain-grid">
         <div>
           <h3>What happened</h3>
@@ -83,9 +85,17 @@ export default function ExplanationPanel({ e }: { e: Explanation }) {
                 voltage, {Math.round(e.plan.max_loading_pct)}% maximum line loading.
               </p>
               <h3>Feeding paths</h3>
+              <p className="small muted">Hover a path to trace it on the feeder map.</p>
               <ul className="paths">
                 {Object.entries(e.plan.paths).map(([zone, path]) => (
-                  <li key={zone}>
+                  <li
+                    key={zone}
+                    tabIndex={0}
+                    onMouseEnter={() => onPath(Number(zone))}
+                    onMouseLeave={() => onPath(null)}
+                    onFocus={() => onPath(Number(zone))}
+                    onBlur={() => onPath(null)}
+                  >
                     <b>Z{zone}</b> {path.map((s) => <span key={s} className="path-step">{s}</span>)}
                   </li>
                 ))}

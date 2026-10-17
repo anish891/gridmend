@@ -76,7 +76,7 @@ export default function ResultsPage() {
                 <div className="kpi-big">{ours.unsafe_plans}</div>
                 <div className="muted small">
                   {unverified.length > 0
-                    ? `vs. ${unverified.map((s) => `${s.unsafe_plans} for ${methodLabel(s.method).toLowerCase()}`).join(", ")}`
+                    ? `vs. ${unverified.map((s) => `${s.unsafe_plans} for ${methodLabel(s.method)}`).join(", ")}`
                     : "every plan is checked first"}
                 </div>
               </div>

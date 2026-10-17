@@ -369,7 +369,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_eval(args: argparse.Namespace) -> int:
-    from eval.run import markdown, run_all, run_llm_only, summarize, write_outputs
+    from eval.run import (
+        markdown, record_llm_only, run_all, run_llm_only, summarize, with_recorded_llm_only,
+        write_outputs,
+    )
 
     extra = []
     if args.llm_only:
@@ -378,6 +381,10 @@ def cmd_eval(args: argparse.Namespace) -> int:
         client, model = make_client()
         extra.append(lambda conn, line: run_llm_only(conn, line, client, model))
     rows = run_all(db.connect(), extra)
+    if args.llm_only:
+        record_llm_only(rows)
+    else:
+        rows = with_recorded_llm_only(rows)
     summary = summarize(rows)
     out = write_outputs(rows, summary)
     print(markdown(rows, summary))

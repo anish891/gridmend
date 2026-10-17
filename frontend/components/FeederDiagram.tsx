@@ -60,6 +60,22 @@ function carriesText(line: Line): string[] {
 function describe(
   state: GridState, kind: string, id: string, clickable: boolean, risk: Risk | null,
 ): Omit<Tooltip, "x" | "y"> {
+  if (kind === "zone") {
+    const zone = state.zones.find((z) => `${z.id}` === id)!;
+    const buses = state.buses.filter((b) => b.zone === zone.id);
+    const sites = buses.filter((b) => b.critical).map((b) => b.facility);
+    return {
+      title: `Zone Z${zone.id}`,
+      lines: [
+        `buses ${buses[0].id}-${buses.at(-1)!.id}, ${Math.round(zone.p_kw)} kW`,
+        zone.faulted ? "faulted: isolated until the line is repaired"
+          : zone.cut_off ? "cut out with the fault"
+          : zone.energized ? "has power" : "no power",
+        ...(sites.length ? [`critical: ${sites.join(", ")}`] : []),
+        "the smallest section switches can cut out",
+      ],
+    };
+  }
   if (kind === "bus") {
     const bus = state.buses.find((b) => `${b.id}` === id)!;
     if (bus.is_source) return { title: "Substation", lines: ["bus 1, feeder source"] };
@@ -120,7 +136,16 @@ export function toElements(state: GridState): ElementDefinition[] {
     return bus.energized ? "live" : "dark";
   };
 
-  const elements: ElementDefinition[] = state.buses.map((bus) => {
+  // Each zone is a compound parent around its buses, so the unit the agent reasons about is visible.
+  const elements: ElementDefinition[] = state.zones.map((zone) => ({
+    group: "nodes",
+    data: { id: `z${zone.id}`, kind: "zone", ref: `${zone.id}`, label: `Z${zone.id}` },
+    // Zones whose bus labels sit above them carry their own label below instead.
+    classes: `zone ${zone.faulted ? "z-faulted" : zone.cut_off ? "z-cut-off" : zone.energized ? "z-live" : "z-dark"}`
+      + (LABEL_ABOVE.has(zone.id) ? " zlabel-below" : ""),
+  }));
+
+  elements.push(...state.buses.map((bus) => {
     const [x, y] = BUS_POSITIONS[bus.id];
     const classes = [busState(bus.id)];
     if (bus.critical) classes.push("critical");
@@ -134,11 +159,12 @@ export function toElements(state: GridState): ElementDefinition[] {
         kind: "bus",
         ref: `${bus.id}`,
         label: bus.is_source ? "substation" : bus.critical ? `${bus.id} ${bus.facility}` : `${bus.id}`,
+        ...(bus.zone !== null ? { parent: `z${bus.zone}` } : {}),
       },
       position: { x, y },
       classes: classes.join(" "),
-    };
-  });
+    } as ElementDefinition;
+  }));
 
   for (const line of state.lines) {
     const from = `b${line.from}`;
@@ -217,6 +243,38 @@ const styleFor = (COLORS: Colors): cytoscape.StylesheetJson => [
       "transition-duration": 0.35,
     },
   },
+  {
+    selector: "node.zone",
+    style: {
+      shape: "round-rectangle",
+      padding: "13px",
+      "compound-sizing-wrt-labels": "exclude",
+      "background-color": COLORS.dark,
+      "background-opacity": 0.07,
+      "border-width": 1,
+      "border-style": "dashed",
+      "border-color": COLORS.dark,
+      "font-size": 11,
+      "font-weight": "bold",
+      color: COLORS.faint,
+      // Top right: laterals join zones at their left end, where a label would sit on the line.
+      "text-valign": "top",
+      "text-halign": "right",
+      "text-margin-x": -24,
+      "text-margin-y": -3,
+      events: "yes",
+    },
+  },
+  { selector: "node.zone.zlabel-below", style: { "text-valign": "bottom", "text-margin-y": 3 } },
+  { selector: "node.zone.z-live", style: { "background-color": COLORS.live, "border-color": COLORS.live, color: COLORS.live } },
+  {
+    selector: "node.zone.z-faulted",
+    style: {
+      "background-color": COLORS.faulted, "background-opacity": 0.14, "border-color": COLORS.faulted,
+      "border-style": "solid", "border-width": 1.5, color: COLORS.faulted,
+    },
+  },
+  { selector: "node.zone.z-cut-off", style: { "background-color": COLORS.faulted, "border-color": COLORS.faulted, color: COLORS.faulted } },
   { selector: "node.live", style: { "background-color": COLORS.live } },
   { selector: "node.faulted", style: { "background-color": COLORS.faulted } },
   // Healthy but isolated with the fault because a jammed switch joins them.
@@ -330,6 +388,14 @@ const styleFor = (COLORS: Colors): cytoscape.StylesheetJson => [
   // Risk map: segments coloured by what a fault there leaves dark; everything else recedes.
   { selector: ".risk-faded", style: { opacity: 0.25 } },
   { selector: "edge.risk", style: { width: 7, "line-color": "data(risk)", "line-style": "solid" } },
+  // A feeding path under the pointer in the explanation: the route from the substation into a zone.
+  { selector: ".path-dim", style: { opacity: 0.25 } },
+  { selector: "edge.path", style: { width: 7, "line-color": COLORS.close, "line-style": "solid", opacity: 1 } },
+  { selector: "node.path", style: { "border-color": COLORS.close, "border-width": 3, opacity: 1 } },
+  {
+    selector: "node.zone.path-zone",
+    style: { "border-color": COLORS.close, "border-style": "solid", "border-width": 2.5, "background-opacity": 0.14 },
+  },
 ];
 
 type Props = {
@@ -339,12 +405,16 @@ type Props = {
   pulse?: Pulse | null;
   problems?: Problems | null;
   risk?: Risk | null;
+  // Zone whose feeding path from the substation to highlight.
+  pathZone?: number | null;
 };
 
 const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-export default function FeederDiagram({ state, onSegmentClick, highlight = [], pulse, problems, risk = null }: Props) {
+export default function FeederDiagram(
+  { state, onSegmentClick, highlight = [], pulse, problems, risk = null, pathZone = null }: Props,
+) {
   const container = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
   // Elements are rebuilt on every state change, so handlers read the latest values.
@@ -476,6 +546,23 @@ export default function FeederDiagram({ state, onSegmentClick, highlight = [], p
       if (line) edge.data("risk", riskColor(line.unserved_kw)).addClass("risk");
     });
   }, [state, risk]);
+
+  useEffect(() => {
+    const graph = cy.current;
+    if (!graph) return;
+    graph.elements(".path, .path-dim, .path-zone").removeClass("path path-dim path-zone");
+    if (pathZone === null) return;
+    // The feeder is radial, so the shortest live route from the substation is the only one.
+    const route = graph.elements("edge.live").union(graph.nodes()).aStar({
+      root: "#b1", goal: `#b${pathZone}`, directed: false,
+    });
+    if (!route.found) return;
+    const zone = graph.getElementById(`z${pathZone}`);
+    const keep = route.path.union(zone).union(zone.children());
+    route.path.addClass("path");
+    zone.addClass("path-zone");
+    graph.elements().not(keep).not("node.zone").addClass("path-dim");
+  }, [state, pathZone]);
 
   return (
     <div className="diagram-wrap">

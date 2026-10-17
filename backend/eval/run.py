@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 
 EVAL_GRAPH = "grid_eval"
 OUT_DIR = Path(__file__).resolve().parent / "out"
+# The LLM-only baseline needs a model endpoint and is not deterministic, so `eval --llm-only`
+# records its rows here and later runs, including the image build, replay them.
+RECORDED_LLM = Path(__file__).resolve().parent / "llm_only.csv"
 
 
 @dataclass
@@ -36,6 +39,8 @@ class Row:
     # After the method's switching: load still dark and critical facilities still dark.
     unserved_kw: float = 0.0
     critical_dark: str = ""
+    # What unverified switching would have restored had it been safe; shown next to the 0 it scores.
+    claimed_kw: float = 0.0
 
 
 def isolated_graph(db: FalkorDB, line: str) -> tuple[Graph, str]:
@@ -70,6 +75,7 @@ def score_unverified(db: FalkorDB, g: Graph, incident_id: str, line: str, method
         switch_ops=len(ops),
         violations=len(result.violations),
         plan_ms=plan_ms,
+        claimed_kw=result.restored_kw,
     )
 
 
@@ -261,7 +267,28 @@ def write_outputs(rows: list[Row], summary: list[dict]) -> Path:
 
 
 def load_results() -> list[Row] | None:
-    path = OUT_DIR / "results.csv"
+    return read_rows(OUT_DIR / "results.csv")
+
+
+def record_llm_only(rows: list[Row]) -> None:
+    with open(RECORDED_LLM, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(asdict(rows[0])))
+        writer.writeheader()
+        writer.writerows(asdict(r) for r in rows if r.method == "llm-only")
+
+
+def with_recorded_llm_only(rows: list[Row]) -> list[Row]:
+    """Insert the recorded LLM-only rows after each fault's greedy row."""
+    recorded = {r.fault: r for r in read_rows(RECORDED_LLM) or []}
+    merged = []
+    for row in rows:
+        merged.append(row)
+        if row.method == "greedy" and row.fault in recorded:
+            merged.append(recorded[row.fault])
+    return merged
+
+
+def read_rows(path: Path) -> list[Row] | None:
     if not path.exists():
         return None
     with open(path, newline="") as f:
@@ -277,6 +304,7 @@ def load_results() -> list[Row] | None:
                 optimal_kw=float(r["optimal_kw"]),
                 unserved_kw=float(r.get("unserved_kw") or 0.0),
                 critical_dark=r.get("critical_dark") or "",
+                claimed_kw=float(r.get("claimed_kw") or 0.0),
             )
             for r in csv.DictReader(f)
         ]

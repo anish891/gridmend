@@ -162,6 +162,8 @@ export type ResultRow = {
   violations: number;
   plan_ms: number;
   optimal_kw: number;
+  // What unchecked switching would have restored had it been safe; it scores 0 when unsafe.
+  claimed_kw: number;
 };
 
 export type MethodSummary = {

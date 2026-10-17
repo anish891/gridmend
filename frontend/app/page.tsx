@@ -19,6 +19,7 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
 import Segmented from "@/components/ui/Segmented";
+import Spinner from "@/components/ui/Spinner";
 import Term from "@/components/ui/Term";
 import {
   api, runAgent, type AgentEvent, type CrewFiling, type Explanation, type GridState, type Location,
@@ -28,6 +29,17 @@ import { problemsFor, withSwitch } from "@/lib/overlay";
 
 // Short pauses between automatic steps so each one is visible on the diagram.
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Brings a section into view once React has rendered it.
+function reveal(id: string) {
+  setTimeout(() => {
+    const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.getElementById(id)?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+  }, 80);
+}
+
+// Where each stepper step's result is shown: the map for the first three, then plans, then the explanation.
+const STEP_TARGETS = ["map", "map", "map", "plans", "plans", "explanation"];
 
 type Step = "fault" | "locate" | "plan";
 
@@ -60,6 +72,8 @@ export default function Home() {
   const [crewResult, setCrewResult] = useState<CrewFiling | null>(null);
   const [risk, setRisk] = useState<Risk | null>(null);
   const [showRisk, setShowRisk] = useState(false);
+  const [pathZone, setPathZone] = useState<number | null>(null);
+  const [demo, setDemo] = useState(false);
 
   const toggleRisk = useCallback(async (on: boolean) => {
     setShowRisk(on);
@@ -152,12 +166,13 @@ export default function Home() {
       setPlan(result);
       setSelected(result.recommended);
       setTrace(await api.trace());
+      reveal("plans");
     } finally {
       setAgentRunning(false);
     }
   }, [working, handleAgentEvent]);
 
-  const run = useCallback(async (from: Step, line?: string) => {
+  const run = useCallback(async (from: Step, line?: string, as: Mode = mode): Promise<PlanResult | null> => {
     setError(null);
     try {
       if (from === "fault" && line) {
@@ -167,9 +182,9 @@ export default function Home() {
         await refresh();
         flash([line], "fault");
         await pause(1100);
-        if (mode === "agent") {
+        if (as === "agent") {
           await runWithAgent();
-          return;
+          return null;
         }
       }
       if (from !== "plan") {
@@ -194,14 +209,17 @@ export default function Home() {
       setPlan(result);
       setSelected(result.recommended);
       setTrace(await api.trace());
+      reveal("plans");
+      return result;
     } catch (e) {
       setError((e as Error).message);
+      return null;
     } finally {
       setBusy(null);
     }
   }, [refresh, working, flash, replay, mode, runWithAgent]);
 
-  const approve = useCallback(async (planId: string) => {
+  const approve = useCallback(async (planId: string, scroll = true): Promise<Explanation | null> => {
     setError(null);
     working(STEP.approve, `Executing ${planId} on the live graph`);
     try {
@@ -211,13 +229,52 @@ export default function Home() {
       await replay(execution.ops);
       await refresh();
       setTrace(await api.trace());
-      setExplanation(await api.explain());
+      const explained = await api.explain();
+      setExplanation(explained);
+      if (scroll) reveal("explanation");
+      return explained;
     } catch (e) {
       setError((e as Error).message);
+      return null;
     } finally {
       setBusy(null);
     }
   }, [refresh, working, replay]);
+
+  // A guided run of the main-line fault: each rejected plan is shown with its reason on the map,
+  // then the recommended one is approved and its feeding paths traced.
+  const playDemo = useCallback(async () => {
+    setDemo(true);
+    try {
+      reveal("progress");
+      const result = await run("fault", "4-5", "rules");
+      if (!result) return;
+      reveal("progress");
+      for (const c of result.candidates.filter((c) => !c.passed)) {
+        const why = c.violations[0] ? `${c.violations[0].type}: ${c.violations[0].detail}` : "it broke a safety rule";
+        working(STEP.verify, `${c.plan_id} was rejected on its copy of the graph. ${why}`);
+        setSelected(c.plan_id);
+        await pause(3200);
+      }
+      if (!result.recommended) return;
+      working(STEP.approve, `${result.recommended} passed every check, so the operator approves it`);
+      setSelected(result.recommended);
+      await pause(2600);
+      const explained = await approve(result.recommended, false);
+      if (explained?.plan) {
+        for (const zone of Object.keys(explained.plan.paths).map(Number)) {
+          working(STEP.restored, `Z${zone} is fed again through ${explained.plan.paths[zone].join(" → ")}`);
+          setPathZone(zone);
+          await pause(2400);
+        }
+        setPathZone(null);
+      }
+      reveal("explanation");
+    } finally {
+      setBusy(null);
+      setDemo(false);
+    }
+  }, [run, working, approve]);
 
   // New conditions change bus weights, so the diagram and status bar are read back afterwards.
   const applyConditions = useCallback(async (conditions: string | null) => {
@@ -263,6 +320,7 @@ export default function Home() {
       setTrace(null);
       setExplanation(null);
       setAgentEvents([]);
+      setPathZone(null);
       setCrewResult(null);
       setCrewError(null);
       await refresh();
@@ -327,18 +385,26 @@ export default function Home() {
     : fault ? <Button onClick={() => run("locate")}>Locate and isolate the fault</Button>
     : null;
 
-  const picking = healthy && !busy;
+  const picking = healthy && !busy && !demo;
 
   return (
     <main>
       <TopBar page="feeder">
-        <Button variant="secondary" disabled={busy !== null || healthy} onClick={resetGrid}>
+        <Button variant="secondary" disabled={busy !== null || demo || healthy} onClick={resetGrid}>
           Reset feeder
         </Button>
       </TopBar>
       {error && <p className="error" role="alert">{error}</p>}
-      {picking ? (
+      {!state && !error ? (
+        <Card className="loading-card">
+          <div className="loading" role="status">
+            <Spinner /> Connecting to the grid twin in FalkorDB…
+          </div>
+          <p className="muted small">Loading the feeder, its switches and the current incident.</p>
+        </Card>
+      ) : picking ? (
         <FaultPicker
+          onDemo={playDemo}
           disabled={busy !== null || contextBusy || crewBusy}
           onFault={(line) => run("fault", line)}
           agentModel={agentModel}
@@ -360,13 +426,15 @@ export default function Home() {
           active={busy?.step ?? null}
           elapsed={Math.round((now - startedAt) / 1000)}
           message={message}
-          action={action}
+          action={demo ? null : action}
+          targets={STEP_TARGETS}
         />
       )}
       {state && <StatusStrip state={state} trace={trace} />}
 
       <div className="layout">
         <Card
+          id="map"
           className="diagram-card"
           title="Feeder map"
           hint={picking ? "IEEE 33-bus feeder. Click a line to fault it, hover anything for details"
@@ -387,7 +455,8 @@ export default function Home() {
               pulse={pulse}
               problems={problems}
               risk={showRisk ? risk : null}
-              onSegmentClick={healthy && !busy && !contextBusy && !crewBusy ? (line) => run("fault", line) : undefined}
+              pathZone={pathZone}
+              onSegmentClick={healthy && !busy && !demo && !contextBusy && !crewBusy ? (line) => run("fault", line) : undefined}
             />
           )}
           {showRisk && (
@@ -453,6 +522,7 @@ export default function Home() {
       )}
       {plan && (
         <Card
+          id="plans"
           className="plans-card"
           title="Restoration plans"
           hint="Ranked by load restored, critical sites first. Select a plan to see it, or why it failed, on the map"
@@ -467,8 +537,8 @@ export default function Home() {
               recommended={plan.recommended}
               selected={selected}
               executed={executed}
-              busy={busy !== null}
-              onSelect={(id) => !executed && setSelected(id)}
+              busy={busy !== null || demo}
+              onSelect={(id) => !executed && !demo && setSelected(id)}
               onApprove={approve}
             />
           )}
@@ -489,7 +559,7 @@ export default function Home() {
           <WhatIf state={state} healthy={healthy} disabled={busy !== null} />
         </div>
       )}
-      {explanation && <ExplanationPanel e={explanation} />}
+      {explanation && <ExplanationPanel e={explanation} onPath={setPathZone} />}
     </main>
   );
 }

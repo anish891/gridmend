@@ -10,18 +10,24 @@ type Props = {
   message: React.ReactNode;
   // The next thing the operator can do, shown beside the message.
   action?: React.ReactNode;
+  // Element id each step's result is shown in; reached steps link there.
+  targets?: (string | null)[];
 };
 
-export default function Stepper({ done, active, elapsed, message, action }: Props) {
+export default function Stepper({ done, active, elapsed, message, action, targets = [] }: Props) {
   return (
-    <section className="stepper" aria-label="Restoration progress">
+    <section id="progress" className="stepper" aria-label="Restoration progress">
       <ol>
         {STEPS.map((label, i) => {
           const state = i === active ? "active" : i < done ? "done" : "todo";
           return (
             <li key={label} className={state} aria-current={state === "active" ? "step" : undefined}>
               <span className="step-mark">{state === "done" ? "✓" : i + 1}</span>
-              <span className="step-label">{label}</span>
+              {state !== "todo" && targets[i] ? (
+                <a className="step-label" href={`#${targets[i]}`}>{label}</a>
+              ) : (
+                <span className="step-label">{label}</span>
+              )}
             </li>
           );
         })}
