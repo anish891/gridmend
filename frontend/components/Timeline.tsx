@@ -26,6 +26,13 @@ export default function Timeline({ fault, locations, trace }: Props) {
             <div className="muted">the substation breaker tripped</div>
           </li>
         )}
+        {/* After a reload the agent's live rounds are gone, but its evidence is in the graph. */}
+        {locations.length === 0 && trace?.incident.evidence && (
+          <li className="event">
+            <b>The agent located it in {trace.incident.zones.map((z) => `Z${z}`).join(" and ")}</b>
+            <div className="muted">{trace.incident.evidence}</div>
+          </li>
+        )}
         {locations.map((location, round) => (
           <li key={round} className="event">
             {round > 0 && <div className="small muted">Breaker tripped again on reclosing</div>}

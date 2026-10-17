@@ -126,13 +126,15 @@ export type Explanation = {
   critical: CriticalLoad[];
   crew_reports: CrewReport[];
   cut_off: { zone: number; via: string }[];
+  // Restoration designs the agent simulated for this incident, and how many passed.
+  designs: { tested: number; passed: number };
   dark_zones: number[];
   load_served_kw: number;
   load_unserved_kw: number;
 };
 
 export type Trace = {
-  incident: { id: string; status: string; zone: number };
+  incident: { id: string; status: string; zone: number; zones: number[]; evidence: string | null };
   plans: { plan: string; kind: string; status: string; ops: string[] }[];
 };
 

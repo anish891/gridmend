@@ -223,7 +223,10 @@ def explain() -> dict:
 def trace() -> dict:
     g = live()
     incident = current_incident(g)
-    return {"incident": incident, "plans": incident_trace(g, incident["id"])}
+    # The agent's own reading of the indicators, so the trace survives a page reload.
+    evidence = g.ro_query("MATCH (i:Incident {id: $id}) RETURN i.evidence",
+                          {"id": incident["id"]}).result_set[0][0]
+    return {"incident": {**incident, "evidence": evidence}, "plans": incident_trace(g, incident["id"])}
 
 
 @app.get("/plans")

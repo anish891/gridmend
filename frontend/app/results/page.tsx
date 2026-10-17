@@ -13,6 +13,9 @@ import { api, type Results } from "@/lib/api";
 import { currentFeeder, FEEDERS, type FeederConfig } from "@/lib/feeders";
 import { METHODS, methodLabel } from "@/lib/methods";
 
+// Baselines plan in milliseconds; the agent works an incident in tens of seconds.
+const duration = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`);
+
 export default function ResultsPage() {
   const [results, setResults] = useState<Results | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +127,7 @@ export default function ResultsPage() {
                       </Term>
                     </th>
                     <th scope="col">Unsafe plans</th>
-                    <th scope="col">Avg. ms</th>
+                    <th scope="col">Avg. time</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -139,7 +142,7 @@ export default function ResultsPage() {
                       <td>{s.switch_ops}</td>
                       <td className={s.violations ? "bad" : undefined}>{s.violations}</td>
                       <td className={s.unsafe_plans ? "bad" : undefined}>{s.unsafe_plans}</td>
-                      <td>{Math.round(s.mean_plan_ms)}</td>
+                      <td>{duration(s.mean_plan_ms)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -74,6 +74,8 @@ export default function Home() {
   // The incident being built on the map before the feeder trips.
   const [scenario, setScenario] = useState<Scenario>({ lines: [], switches: [] });
   const [sideTab, setSideTab] = useState<"incident" | "ask" | "crew">("incident");
+  // The switching the agent is testing right now, drawn on the map while it works.
+  const [designPreview, setDesignPreview] = useState<SwitchOp[]>([]);
   // Positions for a feeder drawn from its coordinates; the 33-bus map needs none.
   const [positions, setPositions] = useState<Positions | null>(null);
 
@@ -145,12 +147,16 @@ export default function Home() {
       await refresh();
     } else if (event.name === "simulate_plan") {
       const isolation = result.purpose === "isolation";
-      flash((event.args.close as string[] | undefined) ?? [], "close");
+      setDesignPreview([
+        ...((event.args.open as string[] | undefined) ?? []).map((switch_id) => ({ op: "open", switch_id }) as SwitchOp),
+        ...((event.args.close as string[] | undefined) ?? []).map((switch_id) => ({ op: "close", switch_id }) as SwitchOp),
+      ]);
       working(isolation ? STEP.isolate : STEP.verify,
         `The agent tested ${isolation ? "an isolation plan" : "a restoration design"} (${result.plan_id}) `
         + `on a fork: ${result.passed ? "passed" : "rejected, revising"}`);
       setTrace(await api.trace());
     } else if (event.name === "execute_isolation") {
+      setDesignPreview([]);
       working(STEP.isolate, result.breaker_tripped_again
         ? "Power reached a fault, so the breaker tripped again: the agent is reading the indicators again"
         : "The agent isolated the fault and reclosed the breaker");
@@ -190,6 +196,7 @@ export default function Home() {
       return null;
     } finally {
       setAgentRunning(false);
+      setDesignPreview([]);
       setBusy(null);
     }
   }, [working, handleAgentEvent, refresh]);
@@ -404,7 +411,7 @@ export default function Home() {
   const healthy = state !== null && !state.incident && !state.lines.some((l) => l.faulted);
   const status = state?.incident?.status;
   const reviewed = plan?.candidates.find((c) => c.plan_id === selected);
-  const highlight = reviewed?.ops ?? [];
+  const highlight = reviewed?.ops ?? designPreview;
   const problems = reviewed && state ? problemsFor(reviewed, state) : null;
   const nothingPassed = plan !== null && !plan.candidates.some((c) => c.passed);
 
@@ -549,11 +556,11 @@ export default function Home() {
                 </li>
               </>
             )}
-            {plan && plan.candidates.length > 0 && (
+            {(designPreview.length > 0 || (plan && plan.candidates.length > 0)) && (
               <>
                 <li><span className="box to-close" /> plan closes</li>
                 <li><span className="box to-open" /> plan opens</li>
-                <li><span className="problem-mark" /> why a plan failed</li>
+                {plan && <li><span className="problem-mark" /> why a plan failed</li>}
               </>
             )}
           </ul>
@@ -578,7 +585,13 @@ export default function Home() {
                 </Card>
               ) : <Intro />
             ) : agentRunning || agentEvents.length > 0 ? (
-              <AgentPanel model={agentModel} events={agentEvents} running={agentRunning} />
+              <AgentPanel
+                model={agentModel}
+                events={agentEvents}
+                running={agentRunning}
+                selected={selected}
+                onPreview={plan && !executed ? (id) => { setSelected(id); reveal("map"); } : undefined}
+              />
             ) : (
               <Timeline fault={fault} locations={locations} trace={trace} />
             )

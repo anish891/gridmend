@@ -1050,6 +1050,20 @@ a.step-label:hover { text-decoration-color: currentColor; }
 .design.fail { border-left-color: var(--faulted); }
 .design.chosen { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .violation-text { color: var(--faulted-text); }
+.design.previewed { background: var(--accent-soft); }
+
+.link-button {
+  justify-self: start;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 
 .op.fi { background: var(--warn-soft); color: var(--fi); }
 
@@ -1567,6 +1581,16 @@ select {
   color: var(--accent);
 }
 
+.outcome {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.outcome .kpi { box-shadow: none; background: var(--bg); }
+.outcome .meter { margin-top: var(--space-2); }
+
 .explain-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
@@ -2015,6 +2039,7 @@ tr.quiet td:not(.bad) { color: var(--muted); }
   .status-bar .stat-wide { grid-column: 1 / -1; order: 1; border-top: 1px solid var(--border); border-left: 0; }
   .layout,
   .explain-grid { grid-template-columns: minmax(0, 1fr); }
+  .outcome { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* Stacked under the map, the side panel scrolls with the page. */
   .side { position: static; max-height: none; overflow: visible; }
 }

@@ -57,11 +57,44 @@ function SwitchingOrder({ e }: { e: Explanation }) {
   );
 }
 
+// The incident at a glance: what came back, at what cost in switching, after how much trial.
+function Outcome({ e }: { e: Explanation }) {
+  const total = e.load_served_kw + e.load_unserved_kw;
+  const powered = e.critical.filter((c) => c.energized).length;
+  const isolating = e.switching_order.filter((s) => s.phase === "isolate").length;
+  const restoring = e.switching_order.length - isolating;
+  return (
+    <div className="outcome" aria-label="Outcome">
+      <div className="kpi">
+        <div className="kpi-label">Load served</div>
+        <div className="kpi-value">{e.load_served_kw} <span className="muted">/ {total} kW</span></div>
+        <div className="meter"><div className="meter-fill" style={{ width: `${(100 * e.load_served_kw) / total}%` }} /></div>
+      </div>
+      <div className="kpi">
+        <div className="kpi-label">Critical sites powered</div>
+        <div className="kpi-value">{powered} <span className="muted">/ {e.critical.length}</span></div>
+        <div className="small muted">{e.critical.filter((c) => c.energized).map((c) => c.facility).join(", ") || "none"}</div>
+      </div>
+      <div className="kpi">
+        <div className="kpi-label">Switch operations</div>
+        <div className="kpi-value">{e.switching_order.length}</div>
+        <div className="small muted">{isolating} to isolate, {restoring} to restore</div>
+      </div>
+      <div className="kpi">
+        <div className="kpi-label">Designs tested</div>
+        <div className="kpi-value">{e.designs.tested}</div>
+        <div className="small muted">{e.designs.passed} passed in simulation</div>
+      </div>
+    </div>
+  );
+}
+
 type Props = { e: Explanation; onPath?: (zone: number | null) => void };
 
 export default function ExplanationPanel({ e, onPath = () => {} }: Props) {
   return (
     <Card id="explanation" className="explanation" title="Explanation" hint="built from the decision trace stored in the graph">
+      <Outcome e={e} />
       <div className="explain-grid">
         <div>
           <h3>What happened</h3>

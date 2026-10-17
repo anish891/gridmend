@@ -166,6 +166,14 @@ def explain_incident(g: Graph, incident_id: str) -> dict:
         })
 
     status = grid_status(g)
+    # Every restoration design the agent simulated, and how many passed (executed ones passed too).
+    tested, passed = g.ro_query(
+        """
+        MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {kind: 'restoration'})
+        RETURN count(p), sum(CASE WHEN p.status = 'rejected' THEN 0 ELSE 1 END)
+        """,
+        {"id": incident_id},
+    ).result_set[0]
     return {
         "incident": incident_id,
         "fault_line": incident[0],
@@ -186,6 +194,7 @@ def explain_incident(g: Graph, incident_id: str) -> dict:
             "MATCH (:Incident {id: $id})-[c:CUTS_OFF]->(z:Zone) RETURN z.id, c.via ORDER BY z.id",
             {"id": incident_id},
         ).result_set],
+        "designs": {"tested": tested, "passed": int(passed or 0)},
         "dark_zones": status["dark_zones"],
         "load_served_kw": round(status["served_kw"]),
         "load_unserved_kw": round(status["total_kw"] - status["served_kw"]),

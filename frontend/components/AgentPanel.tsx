@@ -162,12 +162,19 @@ function Stage({ n, title, state, summary, children }: {
   );
 }
 
-type Props = { model: string | null; events: AgentEvent[]; running: boolean };
+type Props = {
+  model: string | null;
+  events: AgentEvent[];
+  running: boolean;
+  // Once the run is over, a design can be shown on the map.
+  selected?: string | null;
+  onPreview?: (planId: string) => void;
+};
 
 // The agent's work as the decisions it made, built from its tool calls as they stream in:
 // where it located the fault and why, how it isolated it, each restoration design and why it
 // passed or failed, and what it chose.
-export default function AgentPanel({ model, events, running }: Props) {
+export default function AgentPanel({ model, events, running, selected = null, onPreview }: Props) {
   const tools = events.filter((e): e is ToolEvent => e.type === "tool");
   const calls: Call[] = tools.filter((e) => !(e.result as Result).error)
     .map((e) => ({ name: e.name, args: e.args as Record<string, any>, result: e.result as Result }));
@@ -243,8 +250,8 @@ export default function AgentPanel({ model, events, running }: Props) {
               {designs.map((d, i) => {
                 const r = d.result;
                 return (
-                  <li key={r.plan_id} className={["design", r.passed ? "pass" : "fail", r.plan_id === chosenId && "chosen"]
-                    .filter(Boolean).join(" ")}>
+                  <li key={r.plan_id} className={["design", r.passed ? "pass" : "fail", r.plan_id === chosenId && "chosen",
+                    r.plan_id === selected && "previewed"].filter(Boolean).join(" ")}>
                     <div className="attempt-head">
                       <b>Design {i + 1}</b> <code>{r.plan_id}</code> <Verdict r={r} />
                       {r.plan_id === chosenId && <Badge tone="accent" solid>chosen</Badge>}
@@ -257,6 +264,11 @@ export default function AgentPanel({ model, events, running }: Props) {
                       {r.min_voltage_pu != null && ` · lowest ${r.min_voltage_pu} pu`}
                     </div>
                     {!r.passed && <div className="small violation-text">{(r.violations as string[])[0]}</div>}
+                    {onPreview && (
+                      <button type="button" className="link-button" onClick={() => onPreview(r.plan_id)}>
+                        {r.plan_id === selected ? "Shown on the map" : "Show on the map"}
+                      </button>
+                    )}
                   </li>
                 );
               })}
