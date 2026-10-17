@@ -52,7 +52,9 @@ def facilities(g: Graph) -> list[dict]:
 def standing_weight(facility: str) -> int:
     assumptions = load_assumptions()
     weights = assumptions["weights"]
-    return weights["critical"] if facility in assumptions["critical_loads"].values() else weights["default"]
+    # The 33-bus case names critical sites by bus; a generated network lists them by name.
+    critical = set(assumptions.get("critical_loads", {}).values()) | set(assumptions.get("critical_sites", []))
+    return weights["critical"] if facility in critical else weights["default"]
 
 
 PROMPT = """You apply a utility's service restoration priority policy to today's conditions.

@@ -1,7 +1,7 @@
 from falkordb import FalkorDB, Graph
 
 from gridmend.grid.energize import refresh_energization
-from gridmend.grid.load import BASE_GRAPH, LIVE_GRAPH
+from gridmend.grid import feeder
 
 
 class FaultError(Exception):
@@ -74,6 +74,6 @@ def trip(g: Graph) -> list[str]:
 
 
 def reset(db: FalkorDB) -> None:
-    if LIVE_GRAPH in db.list_graphs():
-        db.select_graph(LIVE_GRAPH).delete()
-    db.select_graph(BASE_GRAPH).copy(LIVE_GRAPH)
+    if feeder.live_graph() in db.list_graphs():
+        db.select_graph(feeder.live_graph()).delete()
+    db.select_graph(feeder.base_graph()).copy(feeder.live_graph())

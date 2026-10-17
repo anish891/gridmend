@@ -2,7 +2,7 @@ from mcp.server.mcpserver import MCPServer
 
 from gridmend import db
 from gridmend.agent.tools import SCHEMAS, GridTools
-from gridmend.grid.load import LIVE_GRAPH
+from gridmend.grid.feeder import live_graph
 
 DESCRIPTIONS = {s["function"]["name"]: s["function"]["description"] for s in SCHEMAS}
 
@@ -22,7 +22,7 @@ def tools() -> GridTools:
     global _tools
     if _tools is None:
         conn = db.connect()
-        _tools = GridTools(conn, conn.select_graph(LIVE_GRAPH), approve=lambda plan: True)
+        _tools = GridTools(conn, conn.select_graph(live_graph()), approve=lambda plan: True)
     return _tools
 
 

@@ -35,7 +35,9 @@ evidence and the tools it used, and highlights the path or lines it relied on on
   when idle, so the first visit takes about half a minute to wake it. After that a fault is
   planned and verified in a few seconds; the LLM agent mode takes about a minute.
 
-Press **Play the demo** for a 30-second guided run of the main-line fault, or pick today's
+Use the **network switch** in the top bar to move between the IEEE 33-bus test feeder and a real
+177-bus, two-substation 20 kV network (Oberrhein). Press **Play the demo** for a 30-second guided
+run of a fault, or pick today's
 conditions, then a demo fault (or click any line). **Two faults at once** shows faults on two
 branches found together, and a fault hidden behind another that only shows when the breaker
 recloses onto it. After the main-line fault is restored, **Reconnect the solar plant** brings the
@@ -375,8 +377,10 @@ The same code runs on pandapower's `mv_oberrhein`, a real 20 kV network: 177 bus
 kV substations, four feeders, real cable ratings and six normally open points, three of them
 between the substations. Remote-controlled sectionalizers are placed so zones hold about ten
 buses (20 zones), and the largest load on each feeder stands in for a critical site
-([`oberrhein.yaml`](backend/data/oberrhein.yaml)). It loads into separate graphs, so the UI and
-the 33-bus twin are untouched:
+([`oberrhein.yaml`](backend/data/oberrhein.yaml)). It lives in its own graphs next to the 33-bus
+twin, and the **network switch** in the top bar of the web UI moves between them: the real network
+is drawn from its coordinates, with its own demo faults, Play the demo, Ask the grid, Results and
+Graph pages. Every API call names its feeder (`?feeder=oberrhein`). From the command line:
 
 ```bash
 export GRIDMEND_FEEDER=oberrhein
@@ -436,7 +440,7 @@ gridmend dg --reconnect                    # solar on bus 21 returns once its zo
 gridmend plan                              # stage 2: its output frees line 2-19 for zone Z10
 gridmend reset
 gridmend whatif 6-7 --fault 4-5            # what a jammed 6-7 would cost, on copies of the grid
-pytest                                     # 150 tests, on scratch graphs
+pytest                                     # 152 tests, on scratch graphs
 gridmend eval                              # writes backend/eval/out/results.{csv,md}
 gridmend api                               # HTTP API on :8000
 

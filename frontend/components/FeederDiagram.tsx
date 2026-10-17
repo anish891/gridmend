@@ -121,14 +121,19 @@ function describe(
   };
 }
 
-function midpoint(line: Line): [number, number] {
-  const [x1, y1] = BUS_POSITIONS[line.from];
-  const [x2, y2] = BUS_POSITIONS[line.to];
-  const bow = CURVED_TIES.has(line.id) ? 55 : 0;
+export type Positions = Record<number, [number, number]>;
+
+function midpoint(line: Line, positions: Positions, dense: boolean): [number, number] {
+  const [x1, y1] = positions[line.from];
+  const [x2, y2] = positions[line.to];
+  const bow = !dense && CURVED_TIES.has(line.id) ? 55 : 0;
   return [(x1 + x2) / 2, (y1 + y2) / 2 + bow];
 }
 
-export function toElements(state: GridState): ElementDefinition[] {
+// The hand-drawn 33-bus map draws zones as boxes and labels every bus. A dense map, drawn from
+// a real network's coordinates, colours buses by zone instead (boxes would overlap) and labels
+// only the substations and critical sites.
+export function toElements(state: GridState, positions: Positions = BUS_POSITIONS, dense = false): ElementDefinition[] {
   const faultedZones = new Set(state.zones.filter((z) => z.faulted).map((z) => z.id));
   const cutOffZones = new Set(state.zones.filter((z) => z.cut_off).map((z) => z.id));
   const energized = new Map(state.buses.map((b) => [b.id, b.energized]));
@@ -140,7 +145,7 @@ export function toElements(state: GridState): ElementDefinition[] {
   };
 
   // Each zone is a compound parent around its buses, so the unit the agent reasons about is visible.
-  const elements: ElementDefinition[] = state.zones.map((zone) => ({
+  const elements: ElementDefinition[] = dense ? [] : state.zones.map((zone) => ({
     group: "nodes",
     data: { id: `z${zone.id}`, kind: "zone", ref: `${zone.id}`, label: `Z${zone.id}` },
     // Zones whose bus labels sit above them carry their own label below instead.
@@ -149,13 +154,14 @@ export function toElements(state: GridState): ElementDefinition[] {
   }));
 
   elements.push(...state.buses.map((bus) => {
-    const [x, y] = BUS_POSITIONS[bus.id];
+    const [x, y] = positions[bus.id];
     const classes = [busState(bus.id)];
+    if (dense) classes.push("dense");
     if (bus.critical) classes.push("critical");
     if (bus.is_source) classes.push("source");
     if (bus.dg_kw > 0) classes.push("dg", bus.dg_online ? "dg-on" : "dg-off");
-    if (LABEL_ABOVE.has(bus.id)) classes.push("label-above");
-    if (LABEL_LEFT.has(bus.id)) classes.push("label-left");
+    if (!dense && LABEL_ABOVE.has(bus.id)) classes.push("label-above");
+    if (!dense && LABEL_LEFT.has(bus.id)) classes.push("label-left");
     return {
       group: "nodes",
       data: {
@@ -163,8 +169,8 @@ export function toElements(state: GridState): ElementDefinition[] {
         kind: "bus",
         ref: `${bus.id}`,
         label: bus.is_source ? "substation" : bus.critical ? `${bus.id} ${bus.facility}`
-          : bus.dg_kw > 0 ? `${bus.id} solar` : `${bus.id}`,
-        ...(bus.zone !== null ? { parent: `z${bus.zone}` } : {}),
+          : bus.dg_kw > 0 ? `${bus.id} solar` : dense ? "" : `${bus.id}`,
+        ...(bus.zone !== null && !dense ? { parent: `z${bus.zone}` } : {}),
       },
       position: { x, y },
       classes: classes.join(" "),
@@ -179,21 +185,23 @@ export function toElements(state: GridState): ElementDefinition[] {
       elements.push({
         group: "edges",
         data: { id: `l${line.id}`, source: from, target: to, kind: "line", ref: line.id },
-        classes: ["segment", line.faulted ? "faulted" : live ? "live" : "dark"].join(" "),
+        classes: ["segment", line.faulted ? "faulted" : live ? "live" : "dark", dense && "dense"]
+          .filter(Boolean).join(" "),
       });
       continue;
     }
 
-    const [x, y] = midpoint(line);
+    const [x, y] = midpoint(line, positions, dense);
     const sw = `s${line.id}`;
     elements.push({
       group: "nodes",
-      data: { id: sw, label: line.operable ? line.id : `${line.id} jammed`, kind: "line", ref: line.id },
+      data: { id: sw, label: !line.operable ? `${line.id} jammed` : dense ? "" : line.id, kind: "line", ref: line.id },
       position: { x, y },
       // A switch on a vertical lateral is labelled beside the line instead of on it.
       classes: `switch ${line.kind} ${line.status} fi-${line.fi}`
         + (line.operable ? "" : " jammed")
-        + (BUS_POSITIONS[line.from][0] === BUS_POSITIONS[line.to][0] ? " vertical" : ""),
+        + (dense ? " dense" : "")
+        + (positions[line.from][0] === positions[line.to][0] ? " vertical" : ""),
     });
     for (const [bus, side] of [[from, "a"], [to, "b"]] as const) {
       const busId = Number(bus.slice(1));
@@ -201,18 +209,19 @@ export function toElements(state: GridState): ElementDefinition[] {
       elements.push({
         group: "edges",
         data: { id: `${sw}-${side}`, source: bus, target: sw, kind: "line", ref: line.id },
-        classes: [line.kind, live ? "live" : "dark"].join(" "),
+        classes: [line.kind, live ? "live" : "dark", dense && "dense"].filter(Boolean).join(" "),
       });
     }
   }
   return elements;
 }
 
-// Walk outward from the substation over live edges and add a moving-dash overlay to each
+// Walk outward from every substation over live edges and add a moving-dash overlay to each
 // one, oriented the way power actually flows (ties can carry it either way).
 function addFlowOverlay(graph: Core): void {
-  const visited = new Set(["b1"]);
-  const queue = ["b1"];
+  const sources = graph.nodes(".source").map((n) => n.id());
+  const visited = new Set(sources);
+  const queue = [...sources];
   const overlays: ElementDefinition[] = [];
   while (queue.length) {
     const id = queue.shift()!;
@@ -399,6 +408,15 @@ const styleFor = (COLORS: Colors): cytoscape.StylesheetJson => [
   // Risk map: segments coloured by what a fault there leaves dark; everything else recedes.
   { selector: ".risk-faded", style: { opacity: 0.25 } },
   { selector: "edge.risk", style: { width: 7, "line-color": "data(risk)", "line-style": "solid" } },
+  // A dense map of a real network: smaller marks, larger text (the whole map is zoomed out).
+  { selector: "node.dense", style: { width: 9, height: 9, "font-size": 20, "text-margin-y": 4 } },
+  { selector: "node.dense.critical", style: { width: 26, height: 26, "font-size": 22 } },
+  { selector: "node.dense.source", style: { width: 34, height: 22, "font-size": 22 } },
+  { selector: "node.switch.dense", style: { width: 10, height: 10, "border-width": 1.5 } },
+  { selector: "node.switch.dense.fi-set", style: { "border-width": 4 } },
+  { selector: "edge.dense", style: { width: 3 } },
+  { selector: "edge.dense.tie", style: { width: 2 } },
+  { selector: "edge.dense.faulted", style: { width: 6 } },
   // A feeding path under the pointer in the explanation: the route from the substation into a zone.
   { selector: ".path-dim", style: { opacity: 0.25 } },
   { selector: "edge.path", style: { width: 7, "line-color": COLORS.close, "line-style": "solid", opacity: 1 } },
@@ -418,13 +436,15 @@ type Props = {
   risk?: Risk | null;
   // What to pick out on the map: the feeding path to a bus (and its zone), and particular lines.
   focus?: { bus: number | null; lines: string[] } | null;
+  // Bus positions for a feeder without the hand-drawn layout, drawn as a dense map.
+  positions?: Positions | null;
 };
 
 const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export default function FeederDiagram(
-  { state, onSegmentClick, highlight = [], pulse, problems, risk = null, focus = null }: Props,
+  { state, onSegmentClick, highlight = [], pulse, problems, risk = null, focus = null, positions = null }: Props,
 ) {
   const container = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
@@ -499,7 +519,7 @@ export default function FeederDiagram(
     if (!graph) return;
     const first = graph.elements().empty();
     graph.elements().remove();
-    graph.add(toElements(state));
+    graph.add(toElements(state, positions ?? BUS_POSITIONS, positions !== null));
     addFlowOverlay(graph);
     if (first) {
       graph.resize();
@@ -513,7 +533,7 @@ export default function FeederDiagram(
       fresh.flashClass("fresh", 1600);
     }
     liveBefore.current = live;
-  }, [state]);
+  }, [state, positions]);
 
   useEffect(() => {
     const graph = cy.current;
@@ -565,11 +585,12 @@ export default function FeederDiagram(
     if (!focus) return;
     let keep = graph.collection();
     if (focus.bus !== null) {
-      // The feeder is radial, so the shortest live route from the substation is the only one.
-      const route = graph.elements("edge.live").union(graph.nodes()).aStar({
-        root: "#b1", goal: `#b${focus.bus}`, directed: false,
-      });
-      if (route.found) {
+      // The feeder is radial, so the live route from the substation feeding the bus is the only one.
+      const live = graph.elements("edge.live").union(graph.nodes());
+      const route = graph.nodes(".source").map((source) => live.aStar({
+        root: source, goal: `#b${focus.bus}`, directed: false,
+      })).find((r) => r.found);
+      if (route) {
         const zone = graph.getElementById(`b${focus.bus}`).parent();
         route.path.addClass("path");
         zone.addClass("path-zone");
@@ -586,7 +607,7 @@ export default function FeederDiagram(
 
   return (
     <div className="diagram-wrap">
-      <div ref={container} className="diagram" />
+      <div ref={container} className={positions ? "diagram diagram-tall" : "diagram"} />
       {tooltip && (
         // Near the top of the diagram there is no room above the cursor, so show it below.
         <div className={tooltip.y < 150 ? "tooltip below" : "tooltip"} style={{ left: tooltip.x, top: tooltip.y }}>

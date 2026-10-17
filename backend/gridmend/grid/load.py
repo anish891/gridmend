@@ -1,5 +1,4 @@
 import math
-from pathlib import Path
 
 import yaml
 from falkordb import FalkorDB
@@ -9,14 +8,17 @@ from gridmend.grid.case33 import ieee_bus, line_id
 from gridmend.grid.energize import refresh_energization
 from gridmend.grid.zones import build_zones
 
-ASSUMPTIONS_PATH = feeder.ASSUMPTIONS_PATH
-BASE_GRAPH = feeder.BASE_GRAPH
-LIVE_GRAPH = feeder.LIVE_GRAPH
+
+
+_ASSUMPTIONS: dict[str, dict] = {}
 
 
 def load_assumptions() -> dict:
-    with open(ASSUMPTIONS_PATH) as f:
-        return yaml.safe_load(f)
+    """The current feeder's operating assumptions, read once per feeder."""
+    if feeder.name() not in _ASSUMPTIONS:
+        with open(feeder.assumptions_path()) as f:
+            _ASSUMPTIONS[feeder.name()] = yaml.safe_load(f)
+    return _ASSUMPTIONS[feeder.name()]
 
 
 def bus_rows(net, assumptions: dict) -> list[dict]:
@@ -98,18 +100,19 @@ def write_graph(db: FalkorDB) -> dict:
     module = feeder.network_module()
     net = module.load_network()
     assumptions = load_assumptions()
-    if feeder.NAME == "ieee33":
+    if feeder.name() == "ieee33":
         buses = bus_rows(net, assumptions)
         segs, switches = line_rows(net, assumptions)
     else:
         buses, segs, switches = module.rows(net, assumptions)
 
     existing = set(db.list_graphs())
-    for name in (BASE_GRAPH, LIVE_GRAPH):
+    base, live = feeder.base_graph(), feeder.live_graph()
+    for name in (base, live):
         if name in existing:
             db.select_graph(name).delete()
 
-    g = db.select_graph(BASE_GRAPH)
+    g = db.select_graph(base)
     for label in ("Bus", "Zone", "Plan", "Incident"):
         g.query(f"CREATE INDEX FOR (n:{label}) ON (n.id)")
 
@@ -136,8 +139,8 @@ def write_graph(db: FalkorDB) -> dict:
     build_zones(g)
     refresh_energization(g)
 
-    g.copy(LIVE_GRAPH)
-    return graph_summary(db.select_graph(LIVE_GRAPH))
+    g.copy(live)
+    return graph_summary(db.select_graph(live))
 
 
 def graph_summary(g) -> dict:

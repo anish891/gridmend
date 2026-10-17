@@ -3,32 +3,8 @@ import Link from "next/link";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import type { Results } from "@/lib/api";
+import { currentFeeder, withFeeder, type FeederConfig } from "@/lib/feeders";
 import Segmented from "@/components/ui/Segmented";
-
-const DEMO_FAULTS = [
-  {
-    line: "4-5",
-    title: "Main line fault",
-    note: "The hospital and fire station lose power, and the obvious fix would overload a line.",
-  },
-  {
-    line: "10-11",
-    title: "Mid-feeder fault",
-    note: "Only the fire station's section needs power routed in from elsewhere.",
-  },
-  {
-    line: "27-28",
-    title: "Branch fault",
-    note: "The only backup route drops voltage too low, so no switching is safe.",
-  },
-];
-
-// Two faults at once: on separate branches both show at once; on one path the downstream fault
-// hides the upstream one until the breaker recloses onto it.
-const DOUBLE_FAULTS = [
-  { lines: ["20-21", "27-28"], title: "Two branches", note: "Both faults are found from one set of indicators." },
-  { lines: ["4-5", "16-17"], title: "One behind the other", note: "The upstream fault hides until the breaker recloses onto it." },
-];
 
 export type Mode = "rules" | "agent";
 
@@ -41,26 +17,39 @@ type Props = {
   // Today's conditions, shown before the faults because they set the priorities.
   conditions?: React.ReactNode;
   onDemo: () => void;
+  feeder: FeederConfig;
   // The evaluation's headline numbers, when results are available.
   results?: Results | null;
 };
 
 function Headline({ results }: { results: Results }) {
   const ours = results.summary.find((s) => s.method === "gridmend");
-  const ai = results.summary.find((s) => s.method === "llm-only");
+  const optimum = results.summary.some((s) => s.method === "optimal");
+  // The strongest unchecked baseline the evaluation has: the AI alone, else greedy switching.
+  const rival = results.summary.find((s) => s.method === "llm-only")
+    ?? results.summary.find((s) => s.method === "greedy");
   const faults = new Set(results.rows.map((r) => r.fault)).size;
   if (!ours) return null;
   return (
-    <Link href="/results/" className="hero-stats" aria-label="Evaluation results">
-      <span><b>{ours.pct_optimal.toFixed(0)}%</b> of the best possible restoration</span>
+    <Link href={withFeeder("/results/", currentFeeder())} className="hero-stats" aria-label="Evaluation results">
+      {optimum ? (
+        <span><b>{ours.pct_optimal.toFixed(0)}%</b> of the best possible restoration</span>
+      ) : (
+        <span><b>{(ours.restored_kw / 1000).toFixed(0)} MW</b> restored over every fault</span>
+      )}
       <span><b>{ours.unsafe_plans}</b> unsafe plans across all {faults} faults</span>
-      {ai && <span>AI alone, without the graph: <b className="bad">{ai.unsafe_plans} of {faults}</b> unsafe</span>}
+      {rival && (
+        <span>
+          {rival.method === "llm-only" ? "AI alone, without the graph" : "Greedy, unchecked"}:{" "}
+          <b className="bad">{rival.unsafe_plans} of {faults}</b> unsafe
+        </span>
+      )}
     </Link>
   );
 }
 
 export default function FaultPicker(
-  { disabled, onFault, agentModel, mode, onMode, conditions, onDemo, results }: Props,
+  { disabled, onFault, agentModel, mode, onMode, conditions, onDemo, results, feeder }: Props,
 ) {
   return (
     <Card className="hero">
@@ -75,13 +64,13 @@ export default function FaultPicker(
           <span aria-hidden="true">▶</span> Play the demo
         </Button>
         <span className="muted small">
-          About 30 seconds: a main-line fault, the plans that fail and why, then the restoration.
+          About 30 seconds: a fault, the plans that fail and why, then the restoration.
         </span>
       </div>
       {conditions}
       {conditions && <h2 className="conditions-title">Pick a fault</h2>}
       <div className="demo-faults">
-        {DEMO_FAULTS.map((f) => (
+        {feeder.faults.map((f) => (
           <button key={f.line} type="button" className="demo-fault" disabled={disabled} onClick={() => onFault(f.line)}>
             <span className="demo-title">{f.title}</span>
             <span className="demo-line">line {f.line}</span>
@@ -91,7 +80,7 @@ export default function FaultPicker(
       </div>
       <h3 className="double-title">Or two faults at once</h3>
       <div className="double-faults">
-        {DOUBLE_FAULTS.map((f) => (
+        {feeder.doubles.map((f) => (
           <button key={f.title} type="button" className="demo-fault double" disabled={disabled} onClick={() => onFault(f.lines)}>
             <span className="demo-title">{f.title}</span>
             <span className="demo-line">lines {f.lines.join(" + ")}</span>

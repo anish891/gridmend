@@ -18,6 +18,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default function Timeline({ fault, locations, trace, conditions }: Props) {
+  const breakers = [...new Set((locations[0] ? Object.values(locations[0].chains) : []).map((chain) => chain[0]))];
   return (
     <Card as="aside" className="timeline" title="Decision trace" hint={trace?.incident.id}>
       <ol>
@@ -30,7 +31,10 @@ export default function Timeline({ fault, locations, trace, conditions }: Props)
         {fault && (
           <li className="event fault">
             <b>Fault on {fault}</b>
-            <div className="muted">substation breaker 1-2 tripped</div>
+            {/* Fault current passes the feeder's breaker first, so it heads every indicator chain. */}
+            <div className="muted">
+              {breakers.length ? `substation breaker ${breakers.join(" and ")} tripped` : "the substation breaker tripped"}
+            </div>
           </li>
         )}
         {locations.map((location, round) => (

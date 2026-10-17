@@ -12,7 +12,7 @@ from conftest import TEST_GRAPH
 
 @pytest.fixture
 def client(graph, monkeypatch):
-    monkeypatch.setattr(api, "GRAPH_NAME", TEST_GRAPH)
+    monkeypatch.setattr(api, "graph_name", lambda: TEST_GRAPH)
     return TestClient(api.app)
 
 
@@ -64,7 +64,7 @@ def test_bad_requests_are_400_or_409(client):
 def test_results_match_the_evaluation_output(client, tmp_path, monkeypatch):
     import eval.run as run
 
-    monkeypatch.setattr(run, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(run, "out_dir", lambda: tmp_path)
     assert client.get("/results").status_code == 404
 
     rows = [run.Row("4-5", "gridmend", 850.0, 2, 4, 0, 500.0, 850.0),
@@ -218,7 +218,7 @@ def test_state_reports_what_each_line_carries(client):
 def test_risk_map_comes_from_the_evaluation(client, tmp_path, monkeypatch):
     import eval.run as run
 
-    monkeypatch.setattr(run, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(run, "out_dir", lambda: tmp_path)
     assert client.get("/risk").status_code == 404
     rows = [run.Row("4-5", "gridmend", 850.0, 2, 4, 0, 500.0, 850.0, 2405.0, "water pumping;telecom"),
             run.Row("4-5", "optimal", 850.0, 2, 4, 0, 300.0, 850.0)]
@@ -296,3 +296,47 @@ def test_questions_are_answered_from_the_graph_with_read_only_tools(client, aske
 def test_questions_must_be_short(client, asker):
     assert client.post("/ask", json={"question": " "}).status_code == 422
     assert client.post("/ask", json={"question": "x" * 301}).status_code == 422
+
+
+@pytest.fixture
+def both_feeders(client, falkordb, monkeypatch):
+    """Serve the 33-bus scratch graph by default and an Oberrhein scratch copy on request."""
+    from gridmend.grid import feeder
+    from gridmend.grid.load import write_graph
+
+    with feeder.use("oberrhein"):
+        if feeder.base_graph() not in falkordb.list_graphs():
+            write_graph(falkordb)
+        name = "oberrhein_test"
+        if name in falkordb.list_graphs():
+            falkordb.select_graph(name).delete()
+        copy = falkordb.select_graph(feeder.base_graph()).copy(name)
+    monkeypatch.setattr(api, "graph_name", lambda: name if feeder.name() == "oberrhein" else TEST_GRAPH)
+    yield client
+    copy.delete()
+
+
+def test_each_request_is_served_from_the_feeder_it_names(both_feeders):
+    client = both_feeders
+    assert len(client.get("/state").json()["buses"]) == 33
+    assert len(client.get("/state?feeder=oberrhein").json()["buses"]) == 177
+    assert client.get("/state?feeder=nowhere").status_code == 400
+
+    assert client.get("/layout").json() == {"positions": None}
+    assert len(client.get("/layout?feeder=oberrhein").json()["positions"]) == 177
+    # Every page-load call works on the real network too.
+    for path in ("/context", "/explain", "/trace", "/results", "/risk", "/queries", "/crew", "/generation"):
+        assert client.get(f"{path}?feeder=oberrhein").status_code in (200, 404, 409), path
+
+
+def test_the_whole_loop_runs_on_oberrhein_through_the_api(both_feeders):
+    client = both_feeders
+    # Endpoints run in worker threads; the feeder must follow the request into them.
+    assert client.post("/fault?feeder=oberrhein", json={"line": "27-33"}).status_code == 200
+    assert client.post("/locate?feeder=oberrhein").json()["zones"] == [27]
+    isolation = client.post("/isolate?feeder=oberrhein").json()
+    assert [o["switch_id"] for o in isolation["ops"]] == ["22-27", "71-76", "2-6"]
+    plans = client.post("/plan?feeder=oberrhein").json()
+    assert any(c["passed"] for c in plans["candidates"])
+    # The 33-bus twin is untouched.
+    assert client.get("/state").json()["incident"] is None

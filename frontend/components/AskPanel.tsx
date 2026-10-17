@@ -11,12 +11,6 @@ import { askGrid, type AgentEvent } from "@/lib/api";
 // What the answer leaned on that can be shown on the map: a feeding path or particular lines.
 export type MapFocus = { bus: number | null; lines: string[] };
 
-const HEALTHY_QUESTIONS = [
-  "Which line is most critical right now, and what would a fault there cost?",
-  "How is the hospital fed?",
-  "If line 4-5 faults and tie 8-21 is jammed, what changes?",
-];
-
 const INCIDENT_QUESTIONS = [
   "Why is the telecom site still dark?",
   "What limits restoring more load?",
@@ -35,9 +29,14 @@ function focusOf(tools: ToolEvent[]): MapFocus | null {
   return null;
 }
 
-type Props = { incident: boolean; onFocus: (focus: MapFocus | null) => void };
+type Props = {
+  incident: boolean;
+  // Questions to suggest while the feeder is healthy; they name lines of the network shown.
+  questions: string[];
+  onFocus: (focus: MapFocus | null) => void;
+};
 
-export default function AskPanel({ incident, onFocus }: Props) {
+export default function AskPanel({ incident, questions, onFocus }: Props) {
   const [question, setQuestion] = useState("");
   const [asked, setAsked] = useState<string | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
@@ -74,7 +73,7 @@ export default function AskPanel({ incident, onFocus }: Props) {
   const tools = events.filter((e): e is ToolEvent => e.type === "tool");
   const final = events.find((e) => e.type === "final");
   const failed = events.find((e) => e.type === "error");
-  const suggestions = incident ? INCIDENT_QUESTIONS : HEALTHY_QUESTIONS;
+  const suggestions = incident ? INCIDENT_QUESTIONS : questions;
 
   return (
     <Card

@@ -13,15 +13,18 @@ from gridmend.flisr.trace import SwitchOp
 from gridmend.flisr.verify import verify_plan
 from gridmend.grid import feeder
 from gridmend.grid.case33 import save_voltages
-from gridmend.grid.load import BASE_GRAPH
 from gridmend.sim import apply_fault
 
 if TYPE_CHECKING:
     from eval.optimal import Feeder
 
 EVAL_GRAPH = "grid_eval"
-# The IEEE 33-bus results stay where the API and image expect them; other feeders get a subfolder.
-OUT_DIR = Path(__file__).resolve().parent / "out" / ("" if feeder.NAME == "ieee33" else feeder.NAME)
+OUT_ROOT = Path(__file__).resolve().parent / "out"
+
+
+def out_dir() -> Path:
+    # The IEEE 33-bus results stay where they always were; other feeders get a subfolder.
+    return OUT_ROOT if feeder.name() == "ieee33" else OUT_ROOT / feeder.name()
 # The LLM-only baseline needs a model endpoint and is not deterministic, so `eval --llm-only`
 # records its rows here and later runs, including the image build, replay them.
 RECORDED_LLM = Path(__file__).resolve().parent / "llm_only.csv"
@@ -47,7 +50,7 @@ class Row:
 def isolated_graph(db: FalkorDB, line: str) -> tuple[Graph, str]:
     if EVAL_GRAPH in db.list_graphs():
         db.select_graph(EVAL_GRAPH).delete()
-    g = db.select_graph(BASE_GRAPH).copy(EVAL_GRAPH)
+    g = db.select_graph(feeder.base_graph()).copy(EVAL_GRAPH)
     apply_fault(g, line)
     incident_id, _ = secure(g)
     return g, incident_id
@@ -194,12 +197,12 @@ def run_all(db: FalkorDB, extra_methods=()) -> list[Row]:
     # The oracle needs networkx and pandapower; the API only reads results, so import it here.
     from eval.optimal import Feeder
 
-    if feeder.NAME == "ieee33":
+    if feeder.name() == "ieee33":
         oracle = Feeder()
         segments = oracle.segments
     else:
         oracle = None
-        segments = [row[0] for row in db.select_graph(BASE_GRAPH).ro_query(
+        segments = [row[0] for row in db.select_graph(feeder.base_graph()).ro_query(
             "MATCH ()-[s:SEG]->() RETURN s.id ORDER BY s.id"
         ).result_set]
     rows = []
@@ -262,21 +265,22 @@ def markdown(rows: list[Row], summary: list[dict]) -> str:
 
 
 def write_outputs(rows: list[Row], summary: list[dict]) -> Path:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    with open(OUT_DIR / "results.csv", "w", newline="") as f:
+    out = out_dir()
+    out.mkdir(parents=True, exist_ok=True)
+    with open(out / "results.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(asdict(rows[0])))
         writer.writeheader()
         writer.writerows(asdict(r) for r in rows)
-    (OUT_DIR / "results.md").write_text(markdown(rows, summary))
+    (out / "results.md").write_text(markdown(rows, summary))
     # Every fault's candidate screens and verified power flows were just computed; ship them so a
     # deployed API starts warm.
-    save_screens(OUT_DIR / "screens.json")
-    save_voltages(OUT_DIR / "voltages.json")
-    return OUT_DIR
+    save_screens(out / "screens.json")
+    save_voltages(out / "voltages.json")
+    return out
 
 
 def load_results() -> list[Row] | None:
-    return read_rows(OUT_DIR / "results.csv")
+    return read_rows(out_dir() / "results.csv")
 
 
 def record_llm_only(rows: list[Row]) -> None:

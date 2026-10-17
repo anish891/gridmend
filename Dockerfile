@@ -28,7 +28,9 @@ COPY deploy/ deploy/
 # The evaluation needs a running FalkorDB and takes seconds with build-time CPU, so its
 # results ship in the image instead of being recomputed on a small host.
 # The loaded feeder is saved too, so the container starts without rebuilding the graph.
+# Both feeders are loaded and evaluated, so the network switch in the UI works from the start.
 RUN deploy/falkordb.sh && gridmend load && gridmend eval > /dev/null \
+    && GRIDMEND_FEEDER=oberrhein gridmend load && GRIDMEND_FEEDER=oberrhein gridmend eval > /dev/null \
     && redis-cli save && mkdir -p /app/snapshot && cp /tmp/dump.rdb /app/snapshot/ \
     && redis-cli shutdown nosave
 

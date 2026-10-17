@@ -9,6 +9,7 @@ from pathlib import Path
 from falkordb import FalkorDB, Graph
 
 from gridmend.flisr.generation import NET_P_KW, online_generation
+from gridmend.grid import feeder
 from gridmend.flisr.trace import SwitchOp
 from gridmend.flisr.verify import VerifyResult, next_plan_id, verify_plan
 
@@ -125,14 +126,14 @@ def screen(g: Graph, closed: frozenset[str]) -> Screen:
 # Every graph is a copy of grid_base, so a screen depends only on the fixed topology and loads,
 # on which switches are closed and on which generation is online. Results are kept across
 # incidents within one process.
-_SCREENS: dict[tuple[frozenset[str], frozenset[int]], Screen] = {}
+_SCREENS: dict[tuple[str, frozenset[str], frozenset[int]], Screen] = {}
 _MAX_SCREENS = 20000
 
 
 def save_screens(path: Path) -> None:
     rows = [{"closed": sorted(closed), "generation": sorted(online), "zones": sorted(r.zones),
              "radial": r.radial, "within_capacity": r.within_capacity}
-            for (closed, online), r in _SCREENS.items()]
+            for (name, closed, online), r in _SCREENS.items() if name == feeder.name()]
     path.write_text(json.dumps(rows))
 
 
@@ -140,16 +141,17 @@ def load_screens(path: Path) -> int:
     if not path.exists():
         return 0
     for row in json.loads(path.read_text()):
-        _SCREENS[(frozenset(row["closed"]), frozenset(row.get("generation", [])))] = Screen(
+        _SCREENS[(feeder.name(), frozenset(row["closed"]), frozenset(row.get("generation", [])))] = Screen(
             frozenset(row["zones"]), row["radial"], row["within_capacity"])
-    return len(_SCREENS)
+    return sum(key[0] == feeder.name() for key in _SCREENS)
 
 
 def cached_screen(g: Graph) -> Callable[[frozenset[str]], Screen]:
     online = frozenset(online_generation(g))
+    name = feeder.name()
 
     def check(closed: frozenset[str]) -> Screen:
-        key = (closed, online)
+        key = (name, closed, online)
         if key not in _SCREENS:
             if len(_SCREENS) >= _MAX_SCREENS:
                 _SCREENS.clear()

@@ -1,24 +1,56 @@
-"""Which feeder the twin models. The IEEE 33-bus case is the default and the one the UI draws;
-GRIDMEND_FEEDER=oberrhein loads the real mv_oberrhein network into separate graphs."""
+"""Which feeder the twin models. The IEEE 33-bus case is the default; mv_oberrhein is a real
+20 kV network. Each has its own graphs, so both can be loaded at once. The CLI picks one with
+GRIDMEND_FEEDER; the API picks one per request (see api.py), which is why the choice lives in a
+context variable rather than a module constant."""
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
-NAME = os.getenv("GRIDMEND_FEEDER", "ieee33")
-FEEDERS = ("ieee33", "oberrhein")
-if NAME not in FEEDERS:
-    raise ValueError(f"GRIDMEND_FEEDER must be one of {', '.join(FEEDERS)}, not {NAME}")
+FEEDERS = {
+    "ieee33": "IEEE 33-bus test feeder",
+    "oberrhein": "Oberrhein, a real 20 kV network",
+}
+DEFAULT = os.getenv("GRIDMEND_FEEDER", "ieee33")
+if DEFAULT not in FEEDERS:
+    raise ValueError(f"GRIDMEND_FEEDER must be one of {', '.join(FEEDERS)}, not {DEFAULT}")
 
 DATA = Path(__file__).resolve().parents[2] / "data"
-ASSUMPTIONS_PATH = DATA / ("assumptions.yaml" if NAME == "ieee33" else f"{NAME}.yaml")
+
+_current: ContextVar[str] = ContextVar("feeder", default=DEFAULT)
+
+
+def name() -> str:
+    return _current.get()
+
+
+@contextmanager
+def use(feeder: str):
+    if feeder not in FEEDERS:
+        raise ValueError(f"unknown feeder {feeder}")
+    token = _current.set(feeder)
+    try:
+        yield
+    finally:
+        _current.reset(token)
+
+
+def assumptions_path() -> Path:
+    return DATA / ("assumptions.yaml" if name() == "ieee33" else f"{name()}.yaml")
+
 
 # The default feeder keeps its original graph names so existing deployments are unaffected.
-BASE_GRAPH = "grid_base" if NAME == "ieee33" else f"{NAME}_base"
-LIVE_GRAPH = "grid_live" if NAME == "ieee33" else f"{NAME}_live"
+def base_graph() -> str:
+    return "grid_base" if name() == "ieee33" else f"{name()}_base"
+
+
+def live_graph() -> str:
+    return "grid_live" if name() == "ieee33" else f"{name()}_live"
 
 
 def network_module():
     """The module that builds this feeder's pandapower network and maps its ids."""
-    if NAME == "oberrhein":
+    if name() == "oberrhein":
         from gridmend.grid import oberrhein
 
         return oberrhein

@@ -21,16 +21,26 @@ function tickStep(max: number): number {
   return [1, 2, 5, 10].map((m) => m * power).find((step) => step >= rough)!;
 }
 
+// At most this many faults fit side by side; a large network shows those GridMend restores most on.
+export const MAX_FAULTS = 16;
+
 // Grouped bars of restored kW per fault. An unsafe plan restores nothing and is marked with a red x.
 export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
   const methods = Object.keys(METHOD_COLORS).filter((m) => rows.some((r) => r.method === m));
-  const faults = [...new Set(rows.filter((r) => r.optimal_kw > 0).map((r) => r.fault))];
+  // With an optimum, every fault that leaves load restorable; without one (a network the oracle
+  // cannot solve), the faults where GridMend restored the most.
+  const faults = methods.includes("optimal")
+    ? [...new Set(rows.filter((r) => r.optimal_kw > 0).map((r) => r.fault))]
+    : rows.filter((r) => r.method === "gridmend" && r.restored_kw > 0)
+      .sort((a, b) => b.restored_kw - a.restored_kw)
+      .slice(0, MAX_FAULTS)
+      .map((r) => r.fault);
   if (faults.length === 0) {
     return <EmptyState title="Nothing to chart">No fault leaves restorable load.</EmptyState>;
   }
 
   const shown = rows.filter((r) => faults.includes(r.fault));
-  const highest = Math.max(...shown.map((r) => Math.max(r.optimal_kw, r.claimed_kw ?? 0)));
+  const highest = Math.max(...shown.map((r) => Math.max(r.optimal_kw, r.restored_kw, r.claimed_kw ?? 0)));
   const step = tickStep(highest);
   const top = Math.ceil(highest / step) * step;
   const ticks = Array.from({ length: top / step + 1 }, (_, i) => i * step);

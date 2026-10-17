@@ -208,6 +208,17 @@ button:disabled {
 .muted { color: var(--muted); }
 .small { font-size: var(--fs-sm); }
 
+.feeder-switch select {
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -867,6 +878,12 @@ a.step-label:hover { text-decoration-color: currentColor; }
     radial-gradient(circle, var(--grid-dot) 1px, transparent 1px) 0 0 / 18px 18px,
     var(--panel);
   border-radius: var(--radius-md);
+}
+
+/* A real network drawn from its coordinates is taller than wide. */
+.diagram.diagram-tall {
+  aspect-ratio: auto;
+  height: min(78vh, 760px);
 }
 
 .tooltip {

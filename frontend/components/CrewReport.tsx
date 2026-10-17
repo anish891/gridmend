@@ -6,21 +6,13 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Spinner from "@/components/ui/Spinner";
 import type { CrewFiling, Line } from "@/lib/api";
-
-const EXAMPLES = [
-  {
-    label: "6-7 jammed on patrol",
-    note: "Patrol report, 10:40: the sectionalizer between 6 and 7 is jammed shut, operating handle "
-      + "seized solid. Also a tree leaning on the line near pole 14.",
-  },
-  {
-    label: "12-22 tie broken",
-    note: "Crew at the 12-22 tie: it will not close, the spring mechanism is broken. Parts on order.",
-  },
-];
+import type { CrewExample } from "@/lib/feeders";
 
 type Props = {
   jammed: Line[];
+  // Example notes naming switches of the network shown.
+  examples: CrewExample[];
+  placeholder: string;
   busy: boolean;
   error: string | null;
   result: CrewFiling | null;
@@ -30,7 +22,9 @@ type Props = {
 
 // A field crew's note in their own words. The AI picks out which switches it says are jammed
 // or repaired; GridMend only accepts a finding that names a real switch and quotes the note.
-export default function CrewReport({ jammed, busy, error, result, disabled, onFile }: Props) {
+export default function CrewReport(
+  { jammed, examples, placeholder, busy, error, result, disabled, onFile }: Props,
+) {
   const [note, setNote] = useState("");
 
   return (
@@ -48,12 +42,12 @@ export default function CrewReport({ jammed, busy, error, result, disabled, onFi
           id="crew-note"
           rows={3}
           value={note}
-          placeholder="e.g. Switch 9-10 is seized and won't open."
+          placeholder={placeholder}
           onChange={(event) => setNote(event.target.value)}
         />
         <div className="crew-examples">
           <span className="muted small">Examples:</span>
-          {EXAMPLES.map((e) => (
+          {examples.map((e) => (
             <button key={e.label} type="button" className="crew-example" onClick={() => setNote(e.note)}>
               {e.label}
             </button>

@@ -39,7 +39,7 @@ def load_network() -> pandapowerNet:
 # A power flow depends only on the fixed case, on which lines conduct and on which generation is
 # online, so results are kept per configuration; the evaluation saves them for the deployed
 # image (see eval/run.py).
-_VOLTAGES: dict[tuple[frozenset[str], frozenset[tuple[int, float]]], dict[int, float]] = {}
+_VOLTAGES: dict[tuple[str, frozenset[str], frozenset[tuple[int, float]]], dict[int, float]] = {}
 
 
 def line_ids(net) -> list[str]:
@@ -57,14 +57,14 @@ class PowerFlowError(Exception):
 def bus_voltages(conducting: set[str], generation: dict[int, float] | None = None) -> dict[int, float]:
     """Run a power flow with exactly the given line ids in service and the given generation
     online (kW per IEEE bus, unity power factor); pu voltage per fed bus."""
+    from gridmend.grid import feeder
+
     generation = generation or {}
-    key = (frozenset(conducting), frozenset(generation.items()))
+    key = (feeder.name(), frozenset(conducting), frozenset(generation.items()))
     if key not in _VOLTAGES:
         import pandapower as pp
 
-        from gridmend.grid.feeder import network_module
-
-        module = network_module()
+        module = feeder.network_module()
         net = module.load_network()
         net.line["in_service"] = [lid in conducting for lid in module.line_ids(net)]
         buses = module.bus_map(net)
@@ -83,18 +83,23 @@ def bus_voltages(conducting: set[str], generation: dict[int, float] | None = Non
 
 
 def save_voltages(path: Path) -> None:
+    from gridmend.grid import feeder
+
     rows = [{"conducting": sorted(lines), "generation": dict(generation), "vm_pu": volts}
-            for (lines, generation), volts in _VOLTAGES.items()]
+            for (name, lines, generation), volts in _VOLTAGES.items() if name == feeder.name()]
     path.write_text(json.dumps(rows))
 
 
 def load_voltages(path: Path) -> int:
+    from gridmend.grid import feeder
+
     if not path.exists():
         return 0
     for row in json.loads(path.read_text()):
         generation = frozenset((int(b), kw) for b, kw in row.get("generation", {}).items())
-        _VOLTAGES[(frozenset(row["conducting"]), generation)] = {int(b): v for b, v in row["vm_pu"].items()}
-    return len(_VOLTAGES)
+        key = (feeder.name(), frozenset(row["conducting"]), generation)
+        _VOLTAGES[key] = {int(b): v for b, v in row["vm_pu"].items()}
+    return sum(key[0] == feeder.name() for key in _VOLTAGES)
 
 
 @dataclass(frozen=True)

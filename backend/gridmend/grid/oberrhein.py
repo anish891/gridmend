@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -86,6 +87,21 @@ def line_ids(net) -> list[str]:
 
 def bus_map(net) -> dict[int, int]:
     return dict(layout().bus_id)
+
+
+@cache
+def positions(width: float = 1600.0) -> dict[int, tuple[float, float]]:
+    """Map positions per bus id from the network's longitude and latitude: an equirectangular
+    projection, which is exact enough over a few kilometres, scaled to the given width."""
+    net = _base_network()
+    lay = layout()
+    lon_lat = {lay.bus_id[b]: json.loads(net.bus.geo[b])["coordinates"] for b in lay.bus_id}
+    lat0 = sum(lat for _, lat in lon_lat.values()) / len(lon_lat)
+    xs = {bus: lon * math.cos(math.radians(lat0)) for bus, (lon, _) in lon_lat.items()}
+    ys = {bus: -lat for bus, (_, lat) in lon_lat.items()}
+    left, top = min(xs.values()), min(ys.values())
+    scale = width / (max(xs.values()) - left)
+    return {bus: (round((xs[bus] - left) * scale, 1), round((ys[bus] - top) * scale, 1)) for bus in xs}
 
 
 def sectionalizer_buses(target: int) -> set[int]:

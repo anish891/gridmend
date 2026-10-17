@@ -1,3 +1,4 @@
+import contextvars
 import json
 import os
 from collections.abc import Callable
@@ -6,10 +7,9 @@ import queue
 import threading
 import time
 from dataclasses import asdict
-from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -29,22 +29,25 @@ from gridmend.flisr.trace import incident_trace, open_incident, plan_details
 from gridmend.grid.case33 import load_voltages
 from gridmend.grid.dependency import line_dependencies
 from gridmend.grid.energize import grid_status
-from gridmend.grid.load import LIVE_GRAPH
+from gridmend.grid import feeder
 from gridmend.sim import FaultError, apply_faults, reset
 
-# The graph the API serves; tests point it at a scratch copy.
-GRAPH_NAME = LIVE_GRAPH
 
-# Written next to the evaluation results by `gridmend eval` (see eval/run.py).
-EVAL_OUT = Path(__file__).resolve().parents[1] / "eval" / "out"
+def graph_name() -> str:
+    """The graph a request is served from: the chosen feeder's live twin. Tests patch this."""
+    return feeder.live_graph()
 
 
 def load_caches() -> None:
     # Screens and power flows computed while building the evaluation make the first plan on a
     # slow host as fast as later ones; pandapower, slow to import there, then only loads for a
     # configuration the evaluation never saw.
-    load_screens(EVAL_OUT / "screens.json")
-    load_voltages(EVAL_OUT / "voltages.json")
+    from eval.run import out_dir
+
+    for name in feeder.FEEDERS:
+        with feeder.use(name):
+            load_screens(out_dir() / "screens.json")
+            load_voltages(out_dir() / "voltages.json")
 
 
 @asynccontextmanager
@@ -54,6 +57,17 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="GridMend", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def choose_feeder(request: Request, call_next):
+    # Every request names its feeder (?feeder=oberrhein); without one it gets the default.
+    name = request.query_params.get("feeder", feeder.DEFAULT)
+    if name not in feeder.FEEDERS:
+        return JSONResponse({"detail": f"unknown feeder {name}"}, status_code=400)
+    with feeder.use(name):
+        return await call_next(request)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3001", "http://127.0.0.1:3001"],
@@ -86,7 +100,7 @@ class WhatIfRequest(BaseModel):
 
 
 def live():
-    return db.connect().select_graph(GRAPH_NAME)
+    return db.connect().select_graph(graph_name())
 
 
 def current_incident(g) -> dict:
@@ -94,6 +108,27 @@ def current_incident(g) -> dict:
     if incident is None:
         raise HTTPException(409, "no active incident")
     return incident
+
+
+@app.get("/feeders")
+def feeders() -> dict:
+    """The feeders this server can serve: those whose twin has been loaded."""
+    loaded = set(db.connect().list_graphs())
+    available = []
+    for name, label in feeder.FEEDERS.items():
+        with feeder.use(name):
+            if feeder.live_graph() in loaded:
+                available.append({"id": name, "label": label})
+    return {"default": feeder.DEFAULT, "feeders": available}
+
+
+@app.get("/layout")
+def layout() -> dict:
+    """Map positions for feeders the UI has no hand-drawn layout for."""
+    if feeder.name() == "ieee33":
+        return {"positions": None}
+    module = feeder.network_module()
+    return {"positions": {str(bus): xy for bus, xy in module.positions().items()}}
 
 
 @app.get("/state")
@@ -192,7 +227,7 @@ def reconnect() -> dict:
 @app.post("/plan")
 def plan() -> dict:
     conn = db.connect()
-    g = conn.select_graph(GRAPH_NAME)
+    g = conn.select_graph(graph_name())
     incident = current_incident(g)
     if incident["status"] != "isolated":
         raise HTTPException(409, f"incident is {incident['status']}, not isolated")
@@ -287,7 +322,7 @@ def agent_run() -> StreamingResponse:
     if not settings.llm_configured:
         raise HTTPException(503, "no LLM is configured on this server")
     conn = db.connect()
-    g = conn.select_graph(GRAPH_NAME)
+    g = conn.select_graph(graph_name())
     faulted = g.ro_query("MATCH ()-[s:SEG {faulted: true}]->() RETURN count(s)").result_set[0][0]
     if not faulted or open_incident(g):
         raise HTTPException(409, "the agent starts from a tripped breaker: fault a line first")
@@ -342,7 +377,7 @@ def ask(body: Question) -> StreamingResponse:
         _agent_lock.release()
 
     conn = db.connect()
-    tools = GridTools(conn, conn.select_graph(GRAPH_NAME), approve=lambda plan: False,
+    tools = GridTools(conn, conn.select_graph(graph_name()), approve=lambda plan: False,
                       can_execute=False, only=READ_ONLY)
     return agent_stream(tools, ASK_PROMPT, question, done, ASK_STEPS)
 
@@ -372,7 +407,8 @@ def agent_stream(tools, prompt: str, task: str, done: Callable[[], None],
             done()
             events.put(None)
 
-    threading.Thread(target=work, daemon=True).start()
+    # A plain thread starts with an empty context; run it in the request's, to keep its feeder.
+    threading.Thread(target=contextvars.copy_context().run, args=(work,), daemon=True).start()
 
     def stream():
         while (event := events.get()) is not None:
@@ -392,7 +428,7 @@ def agent_client():
 def queries() -> dict:
     from gridmend.showcase import run_steps
 
-    return {"graph": GRAPH_NAME, "steps": run_steps(live())}
+    return {"graph": graph_name(), "steps": run_steps(live())}
 
 
 @app.get("/dependencies")
@@ -458,7 +494,7 @@ def whatif(request: WhatIfRequest) -> dict:
 
     conn = db.connect()
     try:
-        return what_if(conn, conn.select_graph(GRAPH_NAME), request.switches, request.fault_line)
+        return what_if(conn, conn.select_graph(graph_name()), request.switches, request.fault_line)
     except (WhatIfError, FaultError, LocateError, IsolateError) as exc:
         raise HTTPException(400, str(exc))
 

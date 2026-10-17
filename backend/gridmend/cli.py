@@ -30,11 +30,12 @@ def cmd_basecase(args: argparse.Namespace) -> int:
 
 
 def cmd_load(args: argparse.Namespace) -> int:
-    from gridmend.grid.load import BASE_GRAPH, LIVE_GRAPH, write_graph
+    from gridmend.grid.feeder import base_graph, live_graph
+    from gridmend.grid.load import write_graph
 
     summary = write_graph(db.connect())
     sw = summary["sw"]
-    print(f"wrote {BASE_GRAPH} and {LIVE_GRAPH}")
+    print(f"wrote {base_graph()} and {live_graph()}")
     print(f"buses: {summary['buses']}")
     print(f"SEG:   {summary['seg']}")
     print(f"SW:    {sum(sw.values())} ({', '.join(f'{n} {k}' for k, n in sw.items())})")
@@ -43,10 +44,10 @@ def cmd_load(args: argparse.Namespace) -> int:
 
 
 def cmd_zones(args: argparse.Namespace) -> int:
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
     from gridmend.grid.zones import zone_table
 
-    rows = zone_table(db.connect().select_graph(LIVE_GRAPH))
+    rows = zone_table(db.connect().select_graph(live_graph()))
     print(f"{'zone':<5} {'buses':<8} {'upstream':<9} {'downstream':<20} {'ties':<26} {'kW':>5}")
     for z in rows:
         buses = z["buses"]
@@ -76,9 +77,9 @@ def bus_ranges(ids: list[int]) -> str:
 
 def cmd_status(args: argparse.Namespace) -> int:
     from gridmend.grid.energize import grid_status
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
 
-    s = grid_status(db.connect().select_graph(LIVE_GRAPH))
+    s = grid_status(db.connect().select_graph(live_graph()))
     print(f"energized zones: {zone_list(s['energized_zones'])}")
     print(f"dark zones:      {zone_list(s['dark_zones'])}")
     print(f"faulted zones:   {zone_list(s['faulted_zones'])}")
@@ -93,10 +94,10 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_switch(args: argparse.Namespace) -> int:
     from gridmend.grid.energize import set_switch
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
 
     status = "closed" if args.action == "close" else "open"
-    if not set_switch(db.connect().select_graph(LIVE_GRAPH), args.switch_id, status):
+    if not set_switch(db.connect().select_graph(live_graph()), args.switch_id, status):
         print(f"no switch {args.switch_id}", file=sys.stderr)
         return 1
     print(f"{args.switch_id} {status}")
@@ -104,11 +105,11 @@ def cmd_switch(args: argparse.Namespace) -> int:
 
 
 def cmd_fault(args: argparse.Namespace) -> int:
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
     from gridmend.sim import FaultError, apply_faults
 
     try:
-        path = apply_faults(db.connect().select_graph(LIVE_GRAPH), args.lines)
+        path = apply_faults(db.connect().select_graph(live_graph()), args.lines)
     except FaultError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -119,10 +120,10 @@ def cmd_fault(args: argparse.Namespace) -> int:
 
 def cmd_locate(args: argparse.Namespace) -> int:
     from gridmend.flisr.locate import LocateError, locate_fault
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
 
     try:
-        location = locate_fault(db.connect().select_graph(LIVE_GRAPH))
+        location = locate_fault(db.connect().select_graph(live_graph()))
     except LocateError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -136,9 +137,9 @@ def cmd_isolate(args: argparse.Namespace) -> int:
     from gridmend.flisr.isolate import IsolateError, faulted_zones, secure
     from gridmend.flisr.locate import LocateError
     from gridmend.flisr.trace import incident_trace
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
 
-    g = db.connect().select_graph(LIVE_GRAPH)
+    g = db.connect().select_graph(live_graph())
     try:
         incident_id, ops = secure(g)
     except (LocateError, IsolateError) as exc:
@@ -182,10 +183,10 @@ def print_verify(result) -> None:
 def cmd_verify(args: argparse.Namespace) -> int:
     from gridmend.flisr.trace import open_incident
     from gridmend.flisr.verify import next_plan_id, verify_plan
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
 
     conn = db.connect()
-    g = conn.select_graph(LIVE_GRAPH)
+    g = conn.select_graph(live_graph())
     incident = open_incident(g)
     if not incident or incident["status"] != "isolated":
         print("no isolated incident; run fault and isolate first", file=sys.stderr)
@@ -203,10 +204,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
 def cmd_plan(args: argparse.Namespace) -> int:
     from gridmend.flisr.candidates import plan_restoration
     from gridmend.flisr.trace import open_incident
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
 
     conn = db.connect()
-    g = conn.select_graph(LIVE_GRAPH)
+    g = conn.select_graph(live_graph())
     incident = open_incident(g)
     if not incident or incident["status"] != "isolated":
         print("no isolated incident; run fault and isolate first", file=sys.stderr)
@@ -262,11 +263,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     from gridmend.flisr.isolate import isolate
     from gridmend.flisr.locate import locate_fault
     from gridmend.flisr.trace import open_incident
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
     from gridmend.sim import FaultError, apply_faults
 
     conn = db.connect()
-    g = conn.select_graph(LIVE_GRAPH)
+    g = conn.select_graph(live_graph())
     try:
         apply_faults(g, args.lines)
     except FaultError as exc:
@@ -324,11 +325,11 @@ def cmd_agent(args: argparse.Namespace) -> int:
     from gridmend.agent.llm import make_client
     from gridmend.agent.loop import run_agent
     from gridmend.agent.tools import GridTools
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
     from gridmend.sim import FaultError, apply_fault
 
     conn = db.connect()
-    g = conn.select_graph(LIVE_GRAPH)
+    g = conn.select_graph(live_graph())
     try:
         apply_fault(g, args.line)
     except FaultError as exc:
@@ -394,7 +395,7 @@ def cmd_eval(args: argparse.Namespace) -> int:
 
     if args.llm_only:
         record_llm_only(rows)
-    elif feeder.NAME == "ieee33":
+    elif feeder.name() == "ieee33":
         rows = with_recorded_llm_only(rows)
     summary = summarize(rows)
     out = write_outputs(rows, summary)
@@ -405,9 +406,9 @@ def cmd_eval(args: argparse.Namespace) -> int:
 
 def cmd_context(args: argparse.Namespace) -> int:
     from gridmend.flisr.policy import PolicyError, clear_conditions, current_context, set_conditions
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
 
-    g = db.connect().select_graph(LIVE_GRAPH)
+    g = db.connect().select_graph(live_graph())
     try:
         if args.clear:
             context = clear_conditions(g)
@@ -431,9 +432,9 @@ def cmd_context(args: argparse.Namespace) -> int:
 
 def cmd_crew(args: argparse.Namespace) -> int:
     from gridmend.flisr.crew import CrewError, crew_reports, file_report, jammed_switches
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
 
-    g = db.connect().select_graph(LIVE_GRAPH)
+    g = db.connect().select_graph(live_graph())
     if args.note:
         from gridmend.agent.llm import make_client
 
@@ -465,12 +466,12 @@ def cmd_whatif(args: argparse.Namespace) -> int:
     from gridmend.flisr.isolate import IsolateError
     from gridmend.flisr.locate import LocateError
     from gridmend.flisr.whatif import WhatIfError, what_if
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
     from gridmend.sim import FaultError
 
     conn = db.connect()
     try:
-        r = what_if(conn, conn.select_graph(LIVE_GRAPH), args.switches, args.fault)
+        r = what_if(conn, conn.select_graph(live_graph()), args.switches, args.fault)
     except (WhatIfError, FaultError, LocateError, IsolateError) as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -491,9 +492,9 @@ def cmd_whatif(args: argparse.Namespace) -> int:
 
 def cmd_dg(args: argparse.Namespace) -> int:
     from gridmend.flisr.generation import generation_status, reconnect_generation
-    from gridmend.grid.load import LIVE_GRAPH
+    from gridmend.grid.feeder import live_graph
 
-    g = db.connect().select_graph(LIVE_GRAPH)
+    g = db.connect().select_graph(live_graph())
     if args.reconnect:
         result = reconnect_generation(g)
         back = ", ".join(f"bus {b}" for b in result["reconnected"]) or "nothing"
@@ -508,11 +509,11 @@ def cmd_dg(args: argparse.Namespace) -> int:
 
 
 def cmd_reset(args: argparse.Namespace) -> int:
-    from gridmend.grid.load import BASE_GRAPH, LIVE_GRAPH
+    from gridmend.grid.feeder import base_graph, live_graph
     from gridmend.sim import reset
 
     reset(db.connect())
-    print(f"{LIVE_GRAPH} reset from {BASE_GRAPH}")
+    print(f"{live_graph()} reset from {base_graph()}")
     return 0
 
 

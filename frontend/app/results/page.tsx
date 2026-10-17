@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import ResultsChart from "@/components/ResultsChart";
+import ResultsChart, { MAX_FAULTS } from "@/components/ResultsChart";
 import TopBar from "@/components/TopBar";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
@@ -10,14 +10,17 @@ import EmptyState from "@/components/ui/EmptyState";
 import Spinner from "@/components/ui/Spinner";
 import Term from "@/components/ui/Term";
 import { api, type Results } from "@/lib/api";
+import { currentFeeder, FEEDERS, type FeederConfig } from "@/lib/feeders";
 import { METHODS, methodLabel } from "@/lib/methods";
 
 export default function ResultsPage() {
   const [results, setResults] = useState<Results | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showFaults, setShowFaults] = useState(false);
+  const [feeder, setFeeder] = useState<FeederConfig>(FEEDERS.ieee33);
 
   useEffect(() => {
+    setFeeder(FEEDERS[currentFeeder()]);
     api.results().then(setResults).catch((e: Error) => setError(e.message));
   }, []);
 
@@ -35,7 +38,7 @@ export default function ResultsPage() {
       <header className="page-intro">
         <h1>How GridMend compares</h1>
         <p className="muted">
-          Each of the {faults.length || 23} line segments on the feeder was faulted in turn, and{" "}
+          On the {feeder.label}, each of the {faults.length || "its"} line segments was faulted in turn, and{" "}
           {methods.length || "several"} methods tried to restore power. Unsafe switching counts as restoring nothing, because protection
           would trip it.
         </p>
@@ -65,11 +68,20 @@ export default function ResultsPage() {
             <section className="headline" aria-label="GridMend at a glance">
               <div className="kpi">
                 <div className="kpi-label">Load restored</div>
-                <div className="kpi-big">{ours.pct_optimal.toFixed(0)}%</div>
-                <div className="muted small">
-                  of the best possible: {Math.round(ours.restored_kw)} of{" "}
-                  {Math.round(best?.restored_kw ?? ours.restored_kw)} kW across all faults
-                </div>
+                {best ? (
+                  <>
+                    <div className="kpi-big">{ours.pct_optimal.toFixed(0)}%</div>
+                    <div className="muted small">
+                      of the best possible: {Math.round(ours.restored_kw)} of {Math.round(best.restored_kw)} kW
+                      across all faults
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="kpi-big">{(ours.restored_kw / 1000).toFixed(0)} <span className="muted">MW</span></div>
+                    <div className="muted small">summed over every fault, each plan checked on a fork</div>
+                  </>
+                )}
               </div>
               <div className="kpi">
                 <div className="kpi-label">Unsafe plans carried out</div>
@@ -122,7 +134,7 @@ export default function ResultsPage() {
                         {METHODS[s.method] ? <Term hint={METHODS[s.method].hint}>{methodLabel(s.method)}</Term> : s.method}
                       </th>
                       <td>{Math.round(s.restored_kw)}</td>
-                      <td>{s.pct_optimal.toFixed(1)}</td>
+                      <td>{best ? s.pct_optimal.toFixed(1) : "-"}</td>
                       <td>{s.critical}</td>
                       <td>{s.switch_ops}</td>
                       <td className={s.violations ? "bad" : undefined}>{s.violations}</td>
@@ -134,11 +146,17 @@ export default function ResultsPage() {
               </table>
             </div>
             <p className="muted small">
-              GridMend&apos;s switching is re-checked by an independent networkx and pandapower oracle.
+              {best
+                ? "GridMend's switching is re-checked by an independent networkx and pandapower oracle."
+                : "There is no optimum for this network: the brute-force oracle handles one substation, so GridMend's plans rest on the fork checks alone."}
             </p>
           </Card>
 
-          <Card title="Restored load per fault" hint="Faults that leave some load restorable. Hover a bar for its value">
+          <Card
+            title="Restored load per fault"
+            hint={best ? "Faults that leave some load restorable. Hover a bar for its value"
+              : `The ${MAX_FAULTS} faults where GridMend restored the most. Hover a bar for its value`}
+          >
             <ResultsChart rows={results.rows} />
           </Card>
 
@@ -159,8 +177,9 @@ export default function ResultsPage() {
             {showFaults && (
               <div id="fault-table">
                 <p className="muted small">
-                  Broken safety rules are in brackets. Greyed rows leave nothing restorable, so even the best
-                  possible restores 0 kW.
+                  Broken safety rules are in brackets.{" "}
+                  {best ? "Greyed rows leave nothing restorable, so even the best possible restores 0 kW."
+                    : "Greyed rows are faults where no method restored anything."}
                 </p>
                 <div className="table-wrap">
                   <table>
@@ -173,7 +192,8 @@ export default function ResultsPage() {
                     <tbody>
                       {faults.map((fault) => (
                         <tr key={fault}
-                          className={results.rows.some((r) => r.fault === fault && r.optimal_kw > 0) ? undefined : "quiet"}>
+                          className={results.rows.some((r) => r.fault === fault && (r.optimal_kw > 0 || r.restored_kw > 0))
+                            ? undefined : "quiet"}>
                           <th scope="row">{fault}</th>
                           {methods.map((m) => {
                             const r = results.rows.find((row) => row.fault === fault && row.method === m);

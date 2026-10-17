@@ -9,7 +9,7 @@ import Conditions from "@/components/Conditions";
 import CrewReport from "@/components/CrewReport";
 import ExplanationPanel from "@/components/ExplanationPanel";
 import FaultPicker, { type Mode } from "@/components/FaultPicker";
-import FeederDiagram, { RISK_STEPS, type Pulse, type Risk } from "@/components/FeederDiagram";
+import FeederDiagram, { RISK_STEPS, type Positions, type Pulse, type Risk } from "@/components/FeederDiagram";
 import Intro from "@/components/Intro";
 import StatusStrip from "@/components/StatusStrip";
 import Stepper from "@/components/Stepper";
@@ -26,6 +26,7 @@ import {
   api, runAgent, type AgentEvent, type CrewFiling, type Explanation, type GridState, type Location,
   type OperatingContext, type PlanResult, type Results, type SwitchOp, type Trace,
 } from "@/lib/api";
+import { currentFeeder, FEEDERS, type FeederConfig } from "@/lib/feeders";
 import { problemsFor, withSwitch } from "@/lib/overlay";
 
 // Short pauses between automatic steps so each one is visible on the diagram.
@@ -76,6 +77,9 @@ export default function Home() {
   const [focus, setFocus] = useState<MapFocus | null>(null);
   const [demo, setDemo] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
+  const [feeder, setFeeder] = useState<FeederConfig>(FEEDERS.ieee33);
+  // Positions for a feeder drawn from its coordinates; the 33-bus map needs none.
+  const [positions, setPositions] = useState<Positions | null>(null);
 
   const toggleRisk = useCallback(async (on: boolean) => {
     setShowRisk(on);
@@ -282,7 +286,7 @@ export default function Home() {
     setDemo(true);
     try {
       reveal("progress");
-      const result = await run("fault", "4-5", "rules");
+      const result = await run("fault", feeder.demoLine, "rules");
       if (!result) return;
       reveal("progress");
       for (const c of result.candidates.filter((c) => !c.passed)) {
@@ -309,7 +313,7 @@ export default function Home() {
       setBusy(null);
       setDemo(false);
     }
-  }, [run, working, approve]);
+  }, [run, working, approve, feeder]);
 
   // New conditions change bus weights, so the diagram and status bar are read back afterwards.
   const applyConditions = useCallback(async (conditions: string | null) => {
@@ -367,6 +371,17 @@ export default function Home() {
       setBusy(null);
     }
   }, [refresh, working]);
+
+  useEffect(() => {
+    const chosen = FEEDERS[currentFeeder()];
+    setFeeder(chosen);
+    if (chosen.dense) {
+      api.layout()
+        .then(({ positions: p }) => p && setPositions(
+          Object.fromEntries(Object.entries(p).map(([bus, xy]) => [Number(bus), xy])) as Positions))
+        .catch((e: Error) => setError(`Cannot load the map: ${e.message}`));
+    }
+  }, []);
 
   useEffect(() => {
     api.context().then(setContext).catch(() => setContext(null));
@@ -448,6 +463,7 @@ export default function Home() {
       ) : picking ? (
         <FaultPicker
           onDemo={playDemo}
+          feeder={feeder}
           results={results}
           disabled={busy !== null || contextBusy || crewBusy}
           onFault={(line) => run("fault", line)}
@@ -481,8 +497,8 @@ export default function Home() {
           id="map"
           className="diagram-card"
           title="Feeder map"
-          hint={picking ? "IEEE 33-bus feeder. Click a line to fault it, hover anything for details"
-            : "IEEE 33-bus feeder. Hover anything for details"}
+          hint={picking ? `${feeder.label}. Click a line to fault it, hover anything for details`
+            : `${feeder.label}. Hover anything for details`}
           actions={
             <Segmented
               label="Diagram view"
@@ -492,8 +508,9 @@ export default function Home() {
             />
           }
         >
-          {state && (
+          {state && (!feeder.dense || positions) && (
             <FeederDiagram
+              positions={feeder.dense ? positions : null}
               state={state}
               highlight={highlight}
               pulse={pulse}
@@ -569,7 +586,7 @@ export default function Home() {
         )}
       </div>
 
-      {agentModel && state && <AskPanel incident={!healthy} onFocus={setFocus} />}
+      {agentModel && state && <AskPanel incident={!healthy} questions={feeder.questions} onFocus={setFocus} />}
       {(agentRunning || agentEvents.length > 0) && (
         <AgentPanel model={agentModel} events={agentEvents} running={agentRunning} />
       )}
@@ -602,6 +619,8 @@ export default function Home() {
           {agentModel && (
             <CrewReport
               jammed={state.lines.filter((l) => !l.operable)}
+              examples={feeder.crewExamples}
+              placeholder={feeder.crewPlaceholder}
               busy={crewBusy}
               error={crewError}
               result={crewResult}

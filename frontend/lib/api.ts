@@ -1,3 +1,5 @@
+import { currentFeeder } from "@/lib/feeders";
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export type Bus = {
@@ -214,8 +216,16 @@ export function askGrid(question: string, onEvent: (event: AgentEvent) => void):
   return streamAgent("/ask", { question }, onEvent);
 }
 
+// Every request names the feeder the page shows; the API serves each from that feeder's twin.
+function url(path: string): string {
+  const [route, query] = path.split("?");
+  const params = new URLSearchParams(query);
+  params.set("feeder", currentFeeder());
+  return `${API_URL}${route}?${params}`;
+}
+
 async function streamAgent(path: string, body: unknown, onEvent: (event: AgentEvent) => void): Promise<void> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(url(path), {
     method: "POST",
     cache: "no-store",
     headers: body ? { "content-type": "application/json" } : undefined,
@@ -242,7 +252,7 @@ async function streamAgent(path: string, body: unknown, onEvent: (event: AgentEv
 }
 
 async function call<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(url(path), {
     method,
     cache: "no-store",
     headers: body ? { "content-type": "application/json" } : undefined,
@@ -269,6 +279,9 @@ export const api = {
   risk: () => call<{ lines: RiskLine[] }>("GET", "/risk"),
   agentInfo: () => call<{ available: boolean; model: string | null }>("GET", "/agent"),
   reset: () => call<{ ok: boolean }>("POST", "/reset"),
+  feeders: () => call<{ default: string; feeders: { id: string; label: string }[] }>("GET", "/feeders"),
+  // Map positions for a feeder without a hand-drawn layout; null for the 33-bus feeder.
+  layout: () => call<{ positions: Record<string, [number, number]> | null }>("GET", "/layout"),
   reconnectGeneration: () => call<{ reconnected: number[]; replan: boolean }>("POST", "/generation/reconnect"),
   context: () => call<OperatingContext>("GET", "/context"),
   setConditions: (conditions: string) => call<OperatingContext>("POST", "/context", { conditions }),

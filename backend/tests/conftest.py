@@ -4,7 +4,8 @@ import pytest
 
 from gridmend import db
 from gridmend.grid.case33 import load_network
-from gridmend.grid.load import BASE_GRAPH, line_rows, load_assumptions, write_graph
+from gridmend.grid.feeder import base_graph
+from gridmend.grid.load import line_rows, load_assumptions, write_graph
 
 TEST_GRAPH = "grid_test"
 
@@ -17,7 +18,7 @@ def segment_ids() -> list[str]:
 @pytest.fixture(scope="session")
 def falkordb():
     conn = db.connect()
-    if BASE_GRAPH not in conn.list_graphs():
+    if base_graph() not in conn.list_graphs():
         write_graph(conn)
     return conn
 
@@ -27,7 +28,7 @@ def graph(falkordb):
     # Each test gets its own copy of the pristine grid so grid_live is never touched.
     if TEST_GRAPH in falkordb.list_graphs():
         falkordb.select_graph(TEST_GRAPH).delete()
-    g = falkordb.select_graph(BASE_GRAPH).copy(TEST_GRAPH)
+    g = falkordb.select_graph(base_graph()).copy(TEST_GRAPH)
     yield g
     g.delete()
 

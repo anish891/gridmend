@@ -7,4 +7,7 @@ set -e
 if ! redis-cli GRAPH.LIST | grep -q '^grid_base$'; then
     gridmend load
 fi
+if ! redis-cli GRAPH.LIST | grep -q '^oberrhein_base$'; then
+    GRIDMEND_FEEDER=oberrhein gridmend load
+fi
 exec gridmend serve --ui /app/ui --host 0.0.0.0 --port "${PORT:-7860}"
