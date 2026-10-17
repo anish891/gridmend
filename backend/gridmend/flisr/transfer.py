@@ -24,6 +24,13 @@ FLOW_NETWORK = [
     MATCH (b:Bus) WHERE NOT b.is_source AND b.s_kva > 0
     CREATE (b)-[:FLOW {cap_kva: b.s_kva}]->(t)
     """,
+    # Online generation is a second supply, modelled as an edge from the substation rated at
+    # its output so a single-source max flow still applies.
+    """
+    MATCH (s:Bus {is_source: true}), (g:Bus)
+    WHERE coalesce(g.dg_online, false) AND NOT g.is_source
+    CREATE (s)-[:FLOW {cap_kva: g.dg_kw}]->(g)
+    """,
 ]
 
 TRANSFER_QUERY = """

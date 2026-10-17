@@ -38,7 +38,9 @@ evidence and the tools it used, and highlights the path or lines it relied on on
 Press **Play the demo** for a 30-second guided run of the main-line fault, or pick today's
 conditions, then a demo fault (or click any line). **Two faults at once** shows faults on two
 branches found together, and a fault hidden behind another that only shows when the breaker
-recloses onto it. Watch the indicators, isolation
+recloses onto it. After the main-line fault is restored, **Reconnect the solar plant** brings the
+500 kW plant on the 19-22 lateral back online: its output relieves line 2-19, and a second
+restoration stage picks up zone Z10 as well. Watch the indicators, isolation
 and switching replay on the map, select a plan to see it (or why it failed) on the map, and
 approve one that passed. File a crew note such as "the sectionalizer between 6 and 7 is jammed
 shut" and fault 4-5 again to see the hospital's zone cut out with the fault. Ask **What if a
@@ -400,8 +402,12 @@ gridmend run 4-5 --auto                    # fault -> locate -> isolate -> plan 
 gridmend reset
 gridmend run 4-5 16-17 --auto              # two faults: the upstream one shows only on reclosing
 gridmend reset
+gridmend run 4-5 --auto                    # stage 1: hospital and fire station
+gridmend dg --reconnect                    # solar on bus 21 returns once its zone has power
+gridmend plan                              # stage 2: its output frees line 2-19 for zone Z10
+gridmend reset
 gridmend whatif 6-7 --fault 4-5            # what a jammed 6-7 would cost, on copies of the grid
-pytest                                     # 142 tests, on scratch graphs
+pytest                                     # 146 tests, on scratch graphs
 gridmend eval                              # writes backend/eval/out/results.{csv,md}
 gridmend api                               # HTTP API on :8000
 
@@ -549,7 +555,9 @@ Leave them unset and the site runs rule-based only.
 Faults on unswitched segments only. Simultaneous faults are located and isolated (including a
 fault hidden upstream of another, found when the breaker recloses onto it), but the evaluation
 covers single faults. No protection coordination, transients, unbalanced three-phase modelling,
-distributed generation, real SCADA or time-varying load. Crew reports only mark switches jammed or repaired: there is no crew dispatch or repair
+real SCADA or time-varying load. Distributed generation is one solar plant at unity power
+factor that trips when its bus loses power and reconnects on command (standing in for the
+reconnection delay); there is no islanding, no volt/var control and no solar variability. Crew reports only mark switches jammed or repaired: there is no crew dispatch or repair
 timing, and a jammed switch is assumed stuck in the position the twin shows. Priorities change
 only between incidents. Line loading is checked on summed load kVA; voltage is checked with a
 balanced power flow.

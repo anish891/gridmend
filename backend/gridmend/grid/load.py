@@ -29,6 +29,7 @@ def bus_rows(net, assumptions: dict) -> list[dict]:
     critical = assumptions["critical_loads"]
     facilities = {**assumptions.get("facilities", {}), **critical}
     weights = assumptions["weights"]
+    generation = assumptions.get("generation", {})
     rows = []
     for pp_index in net.bus.index:
         bus = ieee_bus(pp_index)
@@ -43,6 +44,8 @@ def bus_rows(net, assumptions: dict) -> list[dict]:
             "facility": facility or "",
             "weight": weights["critical"] if bus in critical else weights["default"],
             "is_source": bus == assumptions["substation"],
+            "dg_kw": float(generation.get(bus, 0.0)),
+            "dg_online": bus in generation,
         })
     return rows
 

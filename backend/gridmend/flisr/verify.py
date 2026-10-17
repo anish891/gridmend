@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 
 from falkordb import FalkorDB, Graph
 
+from gridmend.flisr.generation import NET_P_KW, online_generation
 from gridmend.flisr.trace import SwitchOp, record_plan
 from gridmend.grid.case33 import PowerFlowError, bus_voltages
 from gridmend.grid.energize import apply_switch_ops
@@ -111,12 +112,12 @@ def check_radiality(fork: Graph) -> list[tuple[str, str]]:
                           f"{buses - 1})")]
 
 
-LOADING_QUERY = """
-MATCH (s:Bus {is_source: true})
-MATCH p = (s)-[:SEG|SW*0..40]-(b:Bus {energized: true})
+LOADING_QUERY = f"""
+MATCH (s:Bus {{is_source: true}})
+MATCH p = (s)-[:SEG|SW*0..40]-(b:Bus {{energized: true}})
 WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
 UNWIND relationships(p) AS r
-WITH r, sum(b.p_kw) AS p_kw, sum(b.q_kvar) AS q_kvar
+WITH r, sum({NET_P_KW}) AS p_kw, sum(b.q_kvar) AS q_kvar
 RETURN r.id AS line, sqrt(p_kw * p_kw + q_kvar * q_kvar) AS kva, r.cap_kva AS rating_kva
 """
 
@@ -153,18 +154,25 @@ def check_voltage(fork: Graph) -> tuple[list[tuple[str, str]], float | None]:
         ).result_set
     }
     try:
-        voltages = bus_voltages(conducting)
+        voltages = bus_voltages(conducting, online_generation(fork))
     except PowerFlowError:
         return [("voltage", "power flow did not converge")], None
 
-    limit = load_assumptions()["voltage_min_pu"]
+    assumptions = load_assumptions()
+    limit, ceiling = assumptions["voltage_min_pu"], assumptions["voltage_max_pu"]
     min_v, min_bus = min((v, bus) for bus, v in voltages.items())
+    max_v, max_bus = max((v, bus) for bus, v in voltages.items())
+    violations = []
     low = sorted(bus for bus, v in voltages.items() if v < limit)
-    if not low:
-        return [], min_v
-    detail = (f"{len(low)} buses below {limit:.2f} pu ({', '.join(map(str, low))}); "
-              f"lowest bus {min_bus} at {min_v:.3f} pu")
-    return [("voltage", detail)], min_v
+    if low:
+        violations.append(("voltage", f"{len(low)} buses below {limit:.2f} pu ({', '.join(map(str, low))}); "
+                                      f"lowest bus {min_bus} at {min_v:.3f} pu"))
+    # Generation feeding a lightly loaded branch can push voltage up instead.
+    high = sorted(bus for bus, v in voltages.items() if v > ceiling)
+    if high:
+        violations.append(("voltage", f"{len(high)} buses above {ceiling:.2f} pu ({', '.join(map(str, high))}); "
+                                      f"highest bus {max_bus} at {max_v:.3f} pu"))
+    return violations, min_v
 
 
 def net_restored_load(fork: Graph, gained: list[int], lost: list[int]) -> tuple[float, float]:

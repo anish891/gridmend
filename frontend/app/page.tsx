@@ -256,6 +256,26 @@ export default function Home() {
     }
   }, [refresh, working, replay]);
 
+  // Solar tripped with the fault; once its zone has had power for a while it can reconnect,
+  // and its output relieves the lines feeding the restored area, so planning runs again.
+  const reconnectSolar = useCallback(async () => {
+    setError(null);
+    working(STEP.verify, "The solar plant reconnects after its delay; checking what more can be restored");
+    try {
+      const { replan } = await api.reconnectGeneration();
+      await refresh();
+      if (!replan) return;
+      setExecuted(null);
+      setExplanation(null);
+      setSelected(null);
+      await run("plan");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }, [refresh, run, working]);
+
   // A guided run of the main-line fault: each rejected plan is shown with its reason on the map,
   // then the recommended one is approved and its feeding paths traced.
   const playDemo = useCallback(async () => {
@@ -387,7 +407,12 @@ export default function Home() {
     : locations.length ? STEP.isolate
     : STEP.locate;
 
+  // Solar on a bus that has power again but is still off, after a restoration.
+  const solarWaiting = status === "restored" && state !== null
+    && state.buses.some((b) => b.dg_kw > 0 && b.energized && !b.dg_online);
+
   const message = busy ? busy.message
+    : solarWaiting ? "Power is back wherever it is safe. The solar plant tripped with the fault; its zone has power again, so it can reconnect and may let more load back on."
     : status === "restored" ? "Power is back wherever it is safe. The explanation below is read from the decision trace."
     : plan?.candidates.length === 0 ? "No backup route reaches the dark sections, so the fault stays isolated."
     : nothingPassed ? "No plan passed the safety checks, so nothing risky was switched. The fault stays isolated."
@@ -397,7 +422,8 @@ export default function Home() {
     : null;
 
   // The one next step for the operator, when it is theirs to take.
-  const action = busy || status === "restored" || plan ? null
+  const action = solarWaiting && !busy ? <Button onClick={reconnectSolar}>Reconnect the solar plant and plan again</Button>
+    : busy || status === "restored" || plan ? null
     : status === "isolated" ? <Button onClick={() => run("plan")}>Find restoration plans</Button>
     : fault ? <Button onClick={() => run("locate")}>Locate and isolate the fault</Button>
     : null;
@@ -503,6 +529,14 @@ export default function Home() {
               </Term>
             </li>
             <li><span className="star">★</span> critical site</li>
+            {state?.buses.some((b) => b.dg_kw > 0) && (
+              <li>
+                <span className="swatch solar" />
+                <Term hint="Solar trips whenever its bus loses power and comes back only after a reconnection delay. Dashed while off.">
+                  solar plant
+                </Term>
+              </li>
+            )}
             {state?.lines.some((l) => !l.operable) && <li><span className="box jammed" /> jammed switch</li>}
             {state?.zones.some((z) => z.cut_off) && (
               <li><span className="swatch cut-off" /> cut out with the fault</li>

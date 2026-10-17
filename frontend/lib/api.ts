@@ -9,6 +9,9 @@ export type Bus = {
   weight: number;
   p_kw: number;
   is_source: boolean;
+  // Distributed generation at the bus (kW) and whether it is producing right now.
+  dg_kw: number;
+  dg_online: boolean;
 };
 
 export type Priority = { facility: string; weight: number; standing: number; rule: string };
@@ -266,6 +269,7 @@ export const api = {
   risk: () => call<{ lines: RiskLine[] }>("GET", "/risk"),
   agentInfo: () => call<{ available: boolean; model: string | null }>("GET", "/agent"),
   reset: () => call<{ ok: boolean }>("POST", "/reset"),
+  reconnectGeneration: () => call<{ reconnected: number[]; replan: boolean }>("POST", "/generation/reconnect"),
   context: () => call<OperatingContext>("GET", "/context"),
   setConditions: (conditions: string) => call<OperatingContext>("POST", "/context", { conditions }),
   clearConditions: () => call<OperatingContext>("DELETE", "/context"),

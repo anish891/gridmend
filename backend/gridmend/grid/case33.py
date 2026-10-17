@@ -36,18 +36,21 @@ def load_network() -> pandapowerNet:
     return copy.deepcopy(_base_network())
 
 
-# A power flow depends only on the fixed case and on which lines conduct, so results are kept
-# per configuration; the evaluation saves them for the deployed image (see eval/run.py).
-_VOLTAGES: dict[frozenset[str], dict[int, float]] = {}
+# A power flow depends only on the fixed case, on which lines conduct and on which generation is
+# online, so results are kept per configuration; the evaluation saves them for the deployed
+# image (see eval/run.py).
+_VOLTAGES: dict[tuple[frozenset[str], frozenset[tuple[int, float]]], dict[int, float]] = {}
 
 
 class PowerFlowError(Exception):
     pass
 
 
-def bus_voltages(conducting: set[str]) -> dict[int, float]:
-    """Run a power flow with exactly the given line ids in service; pu voltage per fed bus."""
-    key = frozenset(conducting)
+def bus_voltages(conducting: set[str], generation: dict[int, float] | None = None) -> dict[int, float]:
+    """Run a power flow with exactly the given line ids in service and the given generation
+    online (kW per IEEE bus, unity power factor); pu voltage per fed bus."""
+    generation = generation or {}
+    key = (frozenset(conducting), frozenset(generation.items()))
     if key not in _VOLTAGES:
         import pandapower as pp
 
@@ -55,6 +58,8 @@ def bus_voltages(conducting: set[str]) -> dict[int, float]:
         net.line["in_service"] = [
             line_id(f, t) in conducting for f, t in zip(net.line.from_bus, net.line.to_bus)
         ]
+        for bus, kw in generation.items():
+            pp.create_sgen(net, bus - 1, p_mw=kw / 1000)
         try:
             pp.runpp(net, numba=False)
         except pp.LoadflowNotConverged as exc:
@@ -66,7 +71,8 @@ def bus_voltages(conducting: set[str]) -> dict[int, float]:
 
 
 def save_voltages(path: Path) -> None:
-    rows = [{"conducting": sorted(key), "vm_pu": volts} for key, volts in _VOLTAGES.items()]
+    rows = [{"conducting": sorted(lines), "generation": dict(generation), "vm_pu": volts}
+            for (lines, generation), volts in _VOLTAGES.items()]
     path.write_text(json.dumps(rows))
 
 
@@ -74,7 +80,8 @@ def load_voltages(path: Path) -> int:
     if not path.exists():
         return 0
     for row in json.loads(path.read_text()):
-        _VOLTAGES[frozenset(row["conducting"])] = {int(b): v for b, v in row["vm_pu"].items()}
+        generation = frozenset((int(b), kw) for b, kw in row.get("generation", {}).items())
+        _VOLTAGES[(frozenset(row["conducting"]), generation)] = {int(b): v for b, v in row["vm_pu"].items()}
     return len(_VOLTAGES)
 
 

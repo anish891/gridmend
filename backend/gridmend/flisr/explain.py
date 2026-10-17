@@ -145,24 +145,26 @@ def explain_incident(g: Graph, incident_id: str) -> dict:
     executed = g.ro_query(
         """
         MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {kind: 'restoration', status: 'executed'})
-        RETURN p.id, p.restored_kw, p.min_v_pu, p.max_loading_pct
+        RETURN p.id, p.restored_kw, p.min_v_pu, p.max_loading_pct ORDER BY p.id
         """,
         {"id": incident_id},
     ).result_set
 
+    # A second stage (after generation reconnects) adds to the first; margins are the latest.
     plan = None
     if executed:
-        plan_id, kw, min_v, max_loading = executed[0]
+        ids = [row[0] for row in executed]
         zones = [row[0] for row in g.ro_query(
-            "MATCH (:Plan {id: $id})-[:RESTORES]->(z:Zone) RETURN z.id ORDER BY z.id",
-            {"id": plan_id},
+            "MATCH (p:Plan)-[:RESTORES]->(z:Zone) WHERE p.id IN $ids RETURN DISTINCT z.id ORDER BY z.id",
+            {"ids": ids},
         ).result_set]
         plan = {
-            "id": plan_id,
-            "ops": plan_steps(g, plan_id),
-            "restored_kw": kw,
-            "min_v_pu": min_v,
-            "max_loading_pct": max_loading,
+            "id": " then ".join(ids),
+            "stages": len(ids),
+            "ops": [step for plan_id in ids for step in plan_steps(g, plan_id)],
+            "restored_kw": sum(row[1] for row in executed),
+            "min_v_pu": executed[-1][2],
+            "max_loading_pct": executed[-1][3],
             "paths": {zone: feeding_path(g, zone) for zone in zones},
         }
 

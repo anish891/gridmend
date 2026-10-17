@@ -68,6 +68,7 @@
   --switch: #1f2328;
   --flow: #ffffff;
   --fresh: #3ccf7a;
+  --solar: #e0a100;
   --tooltip-bg: #1f2328;
   --tooltip-text: #ffffff;
 
@@ -130,6 +131,7 @@
   --switch: #d0d7de;
   --flow: #0d1117;
   --fresh: #6ee7a0;
+  --solar: #f5c542;
   --tooltip-bg: #e6edf3;
   --tooltip-text: #0d1117;
 
@@ -911,6 +913,7 @@ a.step-label:hover { text-decoration-color: currentColor; }
 }
 
 .swatch.live { background: var(--live); }
+.swatch.solar { background: var(--panel); border: 3px solid var(--solar); width: 12px; height: 12px; }
 .swatch.dark { background: var(--dark); }
 .swatch.faulted { background: var(--faulted); }
 

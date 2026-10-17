@@ -19,6 +19,7 @@ from gridmend.flisr.candidates import load_screens, plan_restoration
 from gridmend.flisr.crew import CrewError, CrewModelError, crew_reports, file_report
 from gridmend.flisr.execute import ExecuteError, execute_plan, verified_plans
 from gridmend.flisr.explain import explain_incident
+from gridmend.flisr.generation import generation_status, reconnect_generation
 from gridmend.flisr.isolate import IsolateError, isolate
 from gridmend.flisr.locate import LocateError, locate_fault
 from gridmend.flisr.policy import (
@@ -101,7 +102,8 @@ def state() -> dict:
     buses = g.ro_query(
         """
         MATCH (b:Bus)
-        RETURN b.id, b.zone, b.energized, b.critical, b.facility, b.weight, b.p_kw, b.is_source
+        RETURN b.id, b.zone, b.energized, b.critical, b.facility, b.weight, b.p_kw, b.is_source,
+               coalesce(b.dg_kw, 0), coalesce(b.dg_online, false)
         ORDER BY b.id
         """
     ).result_set
@@ -124,8 +126,9 @@ def state() -> dict:
     return {
         "buses": [
             {"id": b, "zone": zone, "energized": on, "critical": critical,
-             "facility": facility or None, "weight": weight, "p_kw": p_kw, "is_source": source}
-            for b, zone, on, critical, facility, weight, p_kw, source in buses
+             "facility": facility or None, "weight": weight, "p_kw": p_kw, "is_source": source,
+             "dg_kw": dg_kw, "dg_online": dg_online}
+            for b, zone, on, critical, facility, weight, p_kw, source, dg_kw, dg_online in buses
         ],
         "lines": [
             {"id": lid, "from": a, "to": b, "type": "switch" if t == "SW" else "segment",
@@ -173,6 +176,17 @@ def isolate_fault() -> dict:
         raise HTTPException(400, str(exc))
     return {"incident": incident_id, "ops": [{"switch_id": o.switch_id, "op": o.op} for o in ops],
             "tripped_again": open_incident(g)["status"] == "tripped"}
+
+
+@app.get("/generation")
+def generation() -> dict:
+    return {"units": generation_status(live())}
+
+
+@app.post("/generation/reconnect")
+def reconnect() -> dict:
+    """Bring back generation on buses that have power again; may reopen planning."""
+    return reconnect_generation(live())
 
 
 @app.post("/plan")

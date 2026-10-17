@@ -6,6 +6,7 @@ from gridmend.flisr.candidates import Candidate, generate_candidates
 from gridmend.flisr.crew import crew_reports, jammed_switches
 from gridmend.flisr.execute import ExecuteError, execute_plan, verified_plans
 from gridmend.flisr.explain import explain_incident, feeding_path
+from gridmend.flisr.generation import generation_status
 from gridmend.flisr.isolate import IsolateError, isolate
 from gridmend.flisr.locate import LocateError, locate_fault
 from gridmend.flisr.policy import current_context, load_policy
@@ -41,7 +42,8 @@ SCHEMAS = [
                                 "priority weight of every facility for this incident with the "
                                 "policy rule behind it, the full restoration priority policy, "
                                 "and field crew reports with the switches they found jammed."),
-    schema("grid_status", "Energized, dark and faulted zones, switch states and load served."),
+    schema("grid_status", "Energized, dark and faulted zones, switch states, load served, and "
+                          "distributed generation with whether each unit is online."),
     schema("locate_fault", "Find the faulted zones from the chains of tripped fault indicators. "
                            "Faults on separate branches are all found at once."),
     schema("line_dependencies", "For each energized line, the buses, load (kW) and critical "
@@ -151,6 +153,8 @@ class GridTools:
             "switches": {sw["id"]: f"{sw['kind']} {sw['status']}, fi {sw['fi']}"
                                    + ("" if sw["operable"] else ", JAMMED")
                          for sw in s["switches"]},
+            # Online generation offsets load on its lateral; it trips whenever its bus loses power.
+            "generation": generation_status(self.g),
         }
 
     def line_dependencies(self, top: int | None = None) -> dict:

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from falkordb import FalkorDB, Graph
 
+from gridmend.flisr.generation import NET_P_KW, online_generation
 from gridmend.flisr.trace import SwitchOp
 from gridmend.flisr.verify import VerifyResult, next_plan_id, verify_plan
 
@@ -92,11 +93,11 @@ def read_situation(g: Graph) -> Situation:
     )
 
 
-SCREEN_QUERY = """
-MATCH (s:Bus {is_source: true})
+SCREEN_QUERY = f"""
+MATCH (s:Bus {{is_source: true}})
 MATCH p = (s)-[:SEG|SW*0..40]-(b:Bus)
 WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.id IN $closed)
-RETURN b.id, b.zone, b.p_kw, b.q_kvar,
+RETURN b.id, b.zone, {NET_P_KW}, b.q_kvar,
        [r IN relationships(p) | r.id], [r IN relationships(p) | r.cap_kva]
 """
 
@@ -121,15 +122,17 @@ def screen(g: Graph, closed: frozenset[str]) -> Screen:
     return Screen(zones, radial=True, within_capacity=not overloaded)
 
 
-# Every graph is a copy of grid_base, so a screen depends only on the fixed topology and loads
-# and on which switches are closed. Results are kept across incidents within one process.
-_SCREENS: dict[frozenset[str], Screen] = {}
+# Every graph is a copy of grid_base, so a screen depends only on the fixed topology and loads,
+# on which switches are closed and on which generation is online. Results are kept across
+# incidents within one process.
+_SCREENS: dict[tuple[frozenset[str], frozenset[int]], Screen] = {}
 _MAX_SCREENS = 20000
 
 
 def save_screens(path: Path) -> None:
-    rows = [{"closed": sorted(closed), "zones": sorted(r.zones), "radial": r.radial,
-             "within_capacity": r.within_capacity} for closed, r in _SCREENS.items()]
+    rows = [{"closed": sorted(closed), "generation": sorted(online), "zones": sorted(r.zones),
+             "radial": r.radial, "within_capacity": r.within_capacity}
+            for (closed, online), r in _SCREENS.items()]
     path.write_text(json.dumps(rows))
 
 
@@ -137,18 +140,21 @@ def load_screens(path: Path) -> int:
     if not path.exists():
         return 0
     for row in json.loads(path.read_text()):
-        _SCREENS[frozenset(row["closed"])] = Screen(
+        _SCREENS[(frozenset(row["closed"]), frozenset(row.get("generation", [])))] = Screen(
             frozenset(row["zones"]), row["radial"], row["within_capacity"])
     return len(_SCREENS)
 
 
 def cached_screen(g: Graph) -> Callable[[frozenset[str]], Screen]:
+    online = frozenset(online_generation(g))
+
     def check(closed: frozenset[str]) -> Screen:
-        if closed not in _SCREENS:
+        key = (closed, online)
+        if key not in _SCREENS:
             if len(_SCREENS) >= _MAX_SCREENS:
                 _SCREENS.clear()
-            _SCREENS[closed] = screen(g, closed)
-        return _SCREENS[closed]
+            _SCREENS[key] = screen(g, closed)
+        return _SCREENS[key]
 
     return check
 

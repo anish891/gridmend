@@ -19,6 +19,8 @@ def refresh_energization(g: Graph) -> set[int]:
         "MATCH (b:Bus) SET b.energized = b.id IN $live",
         {"live": sorted(live)},
     )
+    # Generation never runs an island: a unit whose bus loses power trips offline.
+    g.query("MATCH (b:Bus) WHERE b.dg_online AND NOT b.energized SET b.dg_online = false")
     g.query(
         """
         MATCH (b:Bus)-[:IN_ZONE]->(z:Zone)

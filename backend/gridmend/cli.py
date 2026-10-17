@@ -487,6 +487,24 @@ def cmd_whatif(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dg(args: argparse.Namespace) -> int:
+    from gridmend.flisr.generation import generation_status, reconnect_generation
+    from gridmend.grid.load import LIVE_GRAPH
+
+    g = db.connect().select_graph(LIVE_GRAPH)
+    if args.reconnect:
+        result = reconnect_generation(g)
+        back = ", ".join(f"bus {b}" for b in result["reconnected"]) or "nothing"
+        print(f"reconnected: {back}")
+        if result["replan"]:
+            print("healthy zones are still dark: planning is open again (gridmend plan)")
+    for unit in generation_status(g):
+        state = "online" if unit["online"] else "offline"
+        power = "has power" if unit["energized"] else "no power"
+        print(f"bus {unit['bus']} (Z{unit['zone']}): {unit['kw']:.0f} kW, {state}, bus {power}")
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     from gridmend.sim import reset
 
@@ -519,6 +537,10 @@ def build_parser() -> argparse.ArgumentParser:
     fault.set_defaults(func=cmd_fault)
 
     sub.add_parser("reset", help="restore grid_live from grid_base").set_defaults(func=cmd_reset)
+    dg = sub.add_parser("dg", help="distributed generation: status, or reconnect units with power")
+    dg.add_argument("--reconnect", action="store_true",
+                    help="bring back units whose bus has power again (after the reconnection delay)")
+    dg.set_defaults(func=cmd_dg)
 
     whatif = sub.add_parser("whatif", help="compare planning with and without switches that "
                                            "cannot operate, on copies of the grid")

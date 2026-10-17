@@ -132,7 +132,7 @@ def test_power_flow_that_does_not_converge_is_a_voltage_violation(graph, monkeyp
     from gridmend.flisr import verify
     from gridmend.grid.case33 import PowerFlowError
 
-    def diverge(conducting):
+    def diverge(conducting, generation=None):
         raise PowerFlowError("power flow did not converge")
 
     monkeypatch.setattr(verify, "bus_voltages", diverge)

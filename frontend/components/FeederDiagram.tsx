@@ -22,6 +22,7 @@ const COLOR_VARS = {
   fi: "--fi",
   close: "--close",
   open: "--open",
+  solar: "--solar",
 };
 
 type Colors = Record<keyof typeof COLOR_VARS, string>;
@@ -86,6 +87,8 @@ function describe(
         `zone Z${bus.zone}, ${Math.round(bus.p_kw)} kW`,
         bus.energized ? "energized" : "de-energized",
         ...(cutOff ? ["cut out with the fault: a jammed switch joins this zone to it"] : []),
+        ...(bus.dg_kw > 0 ? [`solar ${Math.round(bus.dg_kw)} kW, ${bus.dg_online ? "online"
+          : bus.energized ? "offline: waiting out the reconnection delay" : "offline: trips when the bus loses power"}`] : []),
       ],
     };
   }
@@ -150,6 +153,7 @@ export function toElements(state: GridState): ElementDefinition[] {
     const classes = [busState(bus.id)];
     if (bus.critical) classes.push("critical");
     if (bus.is_source) classes.push("source");
+    if (bus.dg_kw > 0) classes.push("dg", bus.dg_online ? "dg-on" : "dg-off");
     if (LABEL_ABOVE.has(bus.id)) classes.push("label-above");
     if (LABEL_LEFT.has(bus.id)) classes.push("label-left");
     return {
@@ -158,7 +162,8 @@ export function toElements(state: GridState): ElementDefinition[] {
         id: `b${bus.id}`,
         kind: "bus",
         ref: `${bus.id}`,
-        label: bus.is_source ? "substation" : bus.critical ? `${bus.id} ${bus.facility}` : `${bus.id}`,
+        label: bus.is_source ? "substation" : bus.critical ? `${bus.id} ${bus.facility}`
+          : bus.dg_kw > 0 ? `${bus.id} solar` : `${bus.id}`,
         ...(bus.zone !== null ? { parent: `z${bus.zone}` } : {}),
       },
       position: { x, y },
@@ -276,6 +281,12 @@ const styleFor = (COLORS: Colors): cytoscape.StylesheetJson => [
   },
   { selector: "node.zone.z-cut-off", style: { "background-color": COLORS.faulted, "border-color": COLORS.faulted, color: COLORS.faulted } },
   { selector: "node.live", style: { "background-color": COLORS.live } },
+  // Solar: a ring around the bus, solid while producing, dashed while tripped off.
+  {
+    selector: "node.dg",
+    style: { width: 18, height: 18, "border-width": 3.5, "border-color": COLORS.solar, "font-weight": "bold" },
+  },
+  { selector: "node.dg-off", style: { "border-style": "dashed", "border-opacity": 0.7 } },
   { selector: "node.faulted", style: { "background-color": COLORS.faulted } },
   // Healthy but isolated with the fault because a jammed switch joins them.
   {

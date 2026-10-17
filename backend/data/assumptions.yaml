@@ -44,3 +44,12 @@ ratings_kva:
 
 # Lowest acceptable voltage at any energized bus after restoration.
 voltage_min_pu: 0.90
+# Highest acceptable voltage; only reachable when generation pushes power back up a line.
+voltage_max_pu: 1.05
+
+# Distributed generation in kW: a community solar plant on the 19-22 lateral, at unity power
+# factor. As interconnection rules require, a unit trips when its bus loses power (it never
+# runs an island) and comes back only after the bus has had power again for a while, so it
+# cannot help pick up load in the first restoration step.
+generation:
+  21: 500
