@@ -7,14 +7,13 @@ import AskPanel, { type MapFocus } from "@/components/AskPanel";
 import CandidateList from "@/components/CandidateList";
 import CrewReport from "@/components/CrewReport";
 import ExplanationPanel from "@/components/ExplanationPanel";
-import FaultPicker, { type Mode } from "@/components/FaultPicker";
+import FaultPicker from "@/components/FaultPicker";
 import FeederDiagram, { RISK_STEPS, type Positions, type Pulse, type Risk } from "@/components/FeederDiagram";
 import Intro from "@/components/Intro";
 import StatusStrip from "@/components/StatusStrip";
 import Stepper from "@/components/Stepper";
 import Timeline from "@/components/Timeline";
 import TopBar from "@/components/TopBar";
-import WhatIf from "@/components/WhatIf";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
@@ -23,7 +22,7 @@ import Spinner from "@/components/ui/Spinner";
 import Term from "@/components/ui/Term";
 import {
   api, runAgent, type AgentEvent, type CrewFiling, type Explanation, type GridState, type Location,
-  type PlanResult, type Results, type SwitchOp, type Trace,
+  type PlanResult, type Results, type SwitchOp, type Trace, type ZoneSwitch,
 } from "@/lib/api";
 import { currentFeeder, FEEDERS, type FeederConfig } from "@/lib/feeders";
 import { problemsFor, withSwitch } from "@/lib/overlay";
@@ -42,8 +41,6 @@ function reveal(id: string) {
 // Where each stepper step's result is shown: the map for the first three, then plans, then the explanation.
 const STEP_TARGETS = ["map", "map", "map", "plans", "plans", "explanation"];
 
-type Step = "fault" | "locate" | "plan";
-
 // Stepper indices: Fault, Locate, Isolate, Verify plans, Approve, Restored.
 const STEP = { fault: 0, locate: 1, isolate: 2, verify: 3, approve: 4, restored: 5 };
 
@@ -61,7 +58,6 @@ export default function Home() {
   const [trace, setTrace] = useState<Trace | null>(null);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
   const [pulse, setPulse] = useState<Pulse | null>(null);
-  const [mode, setMode] = useState<Mode>("rules");
   const [agentModel, setAgentModel] = useState<string | null>(null);
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
   const [agentRunning, setAgentRunning] = useState(false);
@@ -121,28 +117,39 @@ export default function Home() {
     return next;
   }, []);
 
-  // The LLM agent works the incident through its tools; each call it makes is shown on the
-  // diagram as it happens. It only recommends: the operator still approves and executes.
+  // The agent works the incident through its tools; each call it makes is shown on the diagram
+  // as it happens. It isolates on its own; a restoration plan waits for the operator's approval.
   const handleAgentEvent = useCallback(async (event: AgentEvent) => {
     setAgentEvents((events) => [...events, event]);
     if (event.type !== "tool" || "error" in event.result) return;
     const result = event.result as Record<string, any>;
-    if (event.name === "locate_fault") {
-      working(STEP.locate, "The agent is following the chain of tripped fault indicators");
-      const chains: Record<string, string[]> = Object.fromEntries(
-        Object.entries(result.indicator_chains as Record<string, string[]>).map(([z, c]) => [z.slice(1), c]));
-      setLocations((rounds) => [...rounds, {
-        zone: result.faulted_zone, chain: result.indicator_chain, zones: result.faulted_zones, chains,
-      }]);
-      for (const id of new Set(Object.values(chains).flat())) {
-        flash([id], "fi");
-        await pause(600);
+    if (event.name === "zone_map") {
+      const switches = result.switches as ZoneSwitch[];
+      if (!switches.some((s) => s.kind === "breaker" && s.status === "open")) {
+        working(STEP.verify, "The agent is designing a restoration plan from the zone map");
+        return;
       }
+      working(STEP.locate, "The agent is reading the fault indicators");
+      for (const s of switches.filter((s) => s.indicator === "set")) {
+        flash([s.id], "fi");
+        await pause(500);
+      }
+    } else if (event.name === "declare_fault") {
+      const zones = result.faulted_zones as number[];
+      working(STEP.locate, `The agent located the fault in ${zones.map((z) => `Z${z}`).join(" and ")}`);
+      setLocations((rounds) => [...rounds, { zones, evidence: String(event.args.evidence ?? "") }]);
       await refresh();
-    } else if (event.name === "isolation_plan" && !result.already_isolated) {
+    } else if (event.name === "simulate_plan") {
+      const isolation = result.purpose === "isolation";
+      flash((event.args.close as string[] | undefined) ?? [], "close");
+      working(isolation ? STEP.isolate : STEP.verify,
+        `The agent tested ${isolation ? "an isolation plan" : "a restoration design"} (${result.plan_id}) `
+        + `on a fork: ${result.passed ? "passed" : "rejected, revising"}`);
+      setTrace(await api.trace());
+    } else if (event.name === "execute_isolation") {
       working(STEP.isolate, result.breaker_tripped_again
-        ? "The breaker tripped again on reclosing: the agent is looking for a hidden second fault"
-        : "The agent isolated the faulted zone");
+        ? "Power reached a fault, so the breaker tripped again: the agent is reading the indicators again"
+        : "The agent isolated the fault and reclosed the breaker");
       const ops = (result.executed as string[]).map((step) => {
         const [op, switch_id] = step.split(" ");
         return { op, switch_id } as SwitchOp;
@@ -150,22 +157,13 @@ export default function Home() {
       await replay(ops);
       await refresh();
       setTrace(await api.trace());
-    } else if (event.name === "zone_map") {
-      working(STEP.verify, "The agent is designing a restoration plan from the zone map");
-    } else if (event.name === "restoration_candidates") {
-      working(STEP.verify, `The agent is checking its design against ${result.candidates.length} generated plans`);
-    } else if (event.name === "verify_plan") {
-      const own = result.designed_by === "agent";
-      // Show which switches the agent's own design closes.
-      if (own) flash((event.args.close as string[] | undefined) ?? [], "close");
-      working(STEP.verify, `The agent tested ${own ? "its own design" : "generated plan"} ${result.plan_id} on a fork: ${result.passed ? "passed" : own ? "rejected, revising" : "rejected"}`);
-      setTrace(await api.trace());
     } else if (event.name === "recommend_plan") {
       working(STEP.verify, `The agent recommends ${result.recommended} and is writing its explanation`);
     }
   }, [working, flash, refresh, replay]);
 
-  const runWithAgent = useCallback(async () => {
+  const runWithAgent = useCallback(async (): Promise<PlanResult | null> => {
+    setError(null);
     setAgentEvents([]);
     setAgentRunning(true);
     working(STEP.locate, "The operator agent is starting on the incident");
@@ -175,69 +173,40 @@ export default function Home() {
         chain = chain.then(() => handleAgentEvent(event));
       });
       await chain;
+      await refresh();
+      setTrace(await api.trace());
       const result = await api.plans();
       setPlan(result);
       setSelected(result.recommended);
-      setTrace(await api.trace());
-      reveal("plans");
-    } finally {
-      setAgentRunning(false);
-    }
-  }, [working, handleAgentEvent]);
-
-  const run = useCallback(async (from: Step, line?: string | string[], as: Mode = mode): Promise<PlanResult | null> => {
-    setError(null);
-    try {
-      const lines = typeof line === "string" ? [line] : line ?? [];
-      if (from === "fault" && lines.length) {
-        const named = lines.join(" and ");
-        working(STEP.fault, `Fault on ${lines.length > 1 ? "lines" : "line"} ${named}: the breaker trips and the feeder goes dark`);
-        await api.fault(lines);
-        setFault(named);
-        await refresh();
-        flash(lines, "fault");
-        await pause(1100);
-        if (as === "agent") {
-          await runWithAgent();
-          return null;
-        }
-      }
-      // Each round isolates the faults the indicators show. If reclosing trips the breaker again,
-      // a fault was hidden upstream of one already found, so locate and isolate once more.
-      for (let round = 0; from !== "plan" && round < 5; round++) {
-        working(STEP.locate, round === 0 ? "Following the chain of tripped fault indicators"
-          : "The breaker tripped again on reclosing: a second fault was hidden upstream. Following the new indicators");
-        const found = await api.locate();
-        setLocations((rounds) => [...rounds, found]);
-        for (const id of new Set(Object.values(found.chains).flat())) {
-          flash([id], "fi");
-          await pause(600);
-        }
-        await refresh();
-        await pause(400);
-        const zones = found.zones.map((z) => `Z${z}`).join(" and ");
-        working(STEP.isolate, `Cutting out ${zones} and reclosing the substation breaker`);
-        const isolation = await api.isolate();
-        await replay(isolation.ops);
-        await refresh();
-        setTrace(await api.trace());
-        await pause(900);
-        if (!isolation.tripped_again) break;
-      }
-      working(STEP.verify, "Generating restoration plans and verifying each one on a forked graph");
-      const result = await api.plan();
-      setPlan(result);
-      setSelected(result.recommended);
-      setTrace(await api.trace());
       reveal("plans");
       return result;
     } catch (e) {
       setError((e as Error).message);
       return null;
     } finally {
+      setAgentRunning(false);
       setBusy(null);
     }
-  }, [refresh, working, flash, replay, mode, runWithAgent]);
+  }, [working, handleAgentEvent, refresh]);
+
+  const startFault = useCallback(async (line: string | string[]): Promise<PlanResult | null> => {
+    setError(null);
+    const lines = typeof line === "string" ? [line] : line;
+    const named = lines.join(" and ");
+    working(STEP.fault, `Fault on ${lines.length > 1 ? "lines" : "line"} ${named}: the breaker trips and the feeder goes dark`);
+    try {
+      await api.fault(lines);
+      setFault(named);
+      await refresh();
+      flash(lines, "fault");
+      await pause(1100);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(null);
+      return null;
+    }
+    return runWithAgent();
+  }, [working, refresh, flash, runWithAgent]);
 
   const approve = useCallback(async (planId: string, scroll = true): Promise<Explanation | null> => {
     setError(null);
@@ -273,21 +242,22 @@ export default function Home() {
       setExecuted(null);
       setExplanation(null);
       setSelected(null);
-      await run("plan");
+      setPlan(null);
+      await runWithAgent();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(null);
     }
-  }, [refresh, run, working]);
+  }, [refresh, runWithAgent, working]);
 
-  // A guided run of the main-line fault: each rejected plan is shown with its reason on the map,
-  // then the recommended one is approved and its feeding paths traced.
+  // A guided run of the main-line fault: the agent works it, then each design it rejected is
+  // shown with its reason on the map, and the one it recommends is approved and traced.
   const playDemo = useCallback(async () => {
     setDemo(true);
     try {
       reveal("progress");
-      const result = await run("fault", feeder.demoLine, "rules");
+      const result = await startFault(feeder.demoLine);
       if (!result) return;
       reveal("progress");
       for (const c of result.candidates.filter((c) => !c.passed)) {
@@ -314,7 +284,7 @@ export default function Home() {
       setBusy(null);
       setDemo(false);
     }
-  }, [run, working, approve, feeder]);
+  }, [startFault, working, approve, feeder]);
 
   const fileCrewReport = useCallback(async (note: string) => {
     setCrewBusy(true);
@@ -324,14 +294,17 @@ export default function Home() {
       setCrewResult(filed);
       const next = await refresh();
       if (next.incident) setTrace(await api.trace());
-      // A jam found after plans were checked: plan again around it.
-      if (next.incident?.status === "isolated" && plan) await run("plan");
+      // A jam found after the agent designed its plans: let it design again around it.
+      if (next.incident?.status === "isolated" && plan) {
+        setPlan(null);
+        await runWithAgent();
+      }
     } catch (e) {
       setCrewError((e as Error).message);
     } finally {
       setCrewBusy(false);
     }
-  }, [refresh, plan, run]);
+  }, [refresh, plan, runWithAgent]);
 
   const resetGrid = useCallback(async () => {
     setError(null);
@@ -413,18 +386,17 @@ export default function Home() {
   const message = busy ? busy.message
     : solarWaiting ? "Power is back wherever it is safe. The solar plant tripped with the fault; its zone has power again, so it can reconnect and may let more load back on."
     : status === "restored" ? "Power is back wherever it is safe. The explanation below is read from the decision trace."
-    : plan?.candidates.length === 0 ? "No backup route reaches the dark sections, so the fault stays isolated."
-    : nothingPassed ? "No plan passed the safety checks, so nothing risky was switched. The fault stays isolated."
-    : plan ? "Select a plan to preview its switching on the map, then approve one that passed."
-    : status === "isolated" ? "The fault is cut out and everything upstream has power. Next, find routes for the rest."
+    : plan?.candidates.length === 0 ? "The agent found nothing to restore, so the fault stays isolated."
+    : nothingPassed ? "None of the agent's designs passed simulation, so nothing risky was switched. The fault stays isolated."
+    : plan ? "Select a plan to preview its switching on the map, then approve the one the agent recommends or another that passed."
+    : status === "isolated" ? "The fault is cut out and everything upstream has power."
     : fault ? "The substation breaker tripped and the whole feeder is dark."
     : null;
 
   // The one next step for the operator, when it is theirs to take.
   const action = solarWaiting && !busy ? <Button onClick={reconnectSolar}>Reconnect the solar plant and plan again</Button>
-    : busy || status === "restored" || plan ? null
-    : status === "isolated" ? <Button onClick={() => run("plan")}>Find restoration plans</Button>
-    : fault ? <Button onClick={() => run("locate")}>Locate and isolate the fault</Button>
+    : busy || status === "restored" || plan || !agentModel ? null
+    : fault ? <Button onClick={runWithAgent}>Let the agent work the incident</Button>
     : null;
 
   const picking = healthy && !busy && !demo;
@@ -450,10 +422,8 @@ export default function Home() {
           feeder={feeder}
           results={results}
           disabled={busy !== null || crewBusy}
-          onFault={(line) => run("fault", line)}
+          onFault={startFault}
           agentModel={agentModel}
-          mode={mode}
-          onMode={setMode}
         />
       ) : (
         <Stepper
@@ -492,7 +462,7 @@ export default function Home() {
               problems={problems}
               risk={showRisk ? risk : null}
               focus={focus}
-              onSegmentClick={healthy && !busy && !demo && !crewBusy ? (line) => run("fault", line) : undefined}
+              onSegmentClick={healthy && agentModel && !busy && !demo && !crewBusy ? startFault : undefined}
             />
           )}
           {showRisk && (
@@ -570,11 +540,11 @@ export default function Home() {
           id="plans"
           className="plans-card"
           title="Restoration plans"
-          hint="Ranked by load restored, critical sites first. Select a plan to see it, or why it failed, on the map"
+          hint="Every design the agent tested, in order. Select one to see it, or why it failed, on the map"
         >
           {plan.candidates.length === 0 ? (
             <EmptyState title="Nothing to restore">
-              No dead zone can be reached from a live one.
+              The agent did not design a restoration plan for this incident.
             </EmptyState>
           ) : (
             <CandidateList
@@ -603,7 +573,6 @@ export default function Home() {
               onFile={fileCrewReport}
             />
           )}
-          <WhatIf state={state} healthy={healthy} disabled={busy !== null} />
         </div>
       )}
       {explanation && (

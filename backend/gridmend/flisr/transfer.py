@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 from falkordb import Graph
+from redis.exceptions import ResponseError
 
 # Each line becomes a pair of FLOW edges, one per direction, because maxFlow follows edge
 # direction and takes a single relationship type. Every healthy load bus drains into one sink
@@ -53,9 +54,10 @@ def build_flow_network(fork: Graph) -> None:
         fork.query(query)
 
 
-def transfer_limit(g: Graph) -> dict:
+def transfer_limit(g: Graph) -> dict | None:
     """How much healthy load the feeder could carry if every switch outside the faulted zone
-    were free to move, and which lines run at their rating in that best case.
+    were free to move, and which lines run at their rating in that best case. None when
+    FalkorDB's max-flow fails on the network, which it does on some configurations.
 
     Max flow ignores radiality and voltage and adds kVA as scalars, so it bounds what any
     switching plan can restore rather than describing one.
@@ -68,6 +70,8 @@ def transfer_limit(g: Graph) -> dict:
             "MATCH (b:Bus) WHERE NOT b.is_source RETURN sum(b.s_kva)"
         ).result_set[0][0] or 0.0
         deliverable, saturated = fork.ro_query(TRANSFER_QUERY).result_set[0]
+    except ResponseError:
+        return None
     finally:
         fork.delete()
     shortfall = max(demand - deliverable, 0)

@@ -1,7 +1,6 @@
 import pytest
 
-from gridmend.flisr.isolate import isolate
-from gridmend.flisr.locate import locate_fault
+from eval.isolation import isolate, locate_fault
 from gridmend.flisr.trace import SwitchOp
 from gridmend.flisr.verify import check_capacity, energized_zones, verify_plan
 from gridmend.grid.case33 import bus_voltages

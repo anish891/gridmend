@@ -2,15 +2,14 @@ import json
 
 import pytest
 
-from gridmend.flisr.candidates import generate_candidates, plan_restoration
 from gridmend.flisr.crew import CrewError, file_report, jammed_switches, validate
-from gridmend.flisr.execute import restore
 from gridmend.flisr.explain import explain_incident
-from gridmend.flisr.isolate import isolate
-from gridmend.flisr.locate import locate_fault
+from gridmend.flisr.locate import declare_fault
 from gridmend.flisr.trace import SwitchOp, plan_details
 from gridmend.flisr.verify import verify_plan
 from gridmend.sim import apply_fault
+
+from conftest import isolated, run_plan
 
 KNOWN = {"6-7": "closed", "9-10": "closed", "12-22": "open", "8-21": "open"}
 NOTE = "Patrol at the 6-7 sectionalizer: it is JAMMED shut, operating handle seized. Tree near pole 14."
@@ -43,11 +42,7 @@ def test_evidence_matches_despite_case_and_punctuation():
     assert other == "tree near pole 14"
 
 
-def isolated(graph, line):
-    apply_fault(graph, line)
-    locate_fault(graph)
-    incident_id, ops = isolate(graph)
-    return incident_id, [(o.op, o.switch_id) for o in ops]
+Z3_ISOLATION = {"open": ["2-3", "3-23", "6-26", "9-10"], "close": ["1-2"]}
 
 
 def test_a_switch_jammed_on_patrol_cuts_its_neighbour_out_with_the_fault(falkordb, graph, fixed_model):
@@ -56,13 +51,14 @@ def test_a_switch_jammed_on_patrol_cuts_its_neighbour_out_with_the_fault(falkord
     assert report["report"] == "cr1" and "6-7" in model.prompt
     assert jammed_switches(graph) == [{"id": "6-7", "stuck": "closed", "report": "cr1"}]
 
-    incident_id, ops = isolated(graph, "4-5")
-
-    # 6-7 cannot open, so Z7 goes with the fault and 9-10 opens instead.
-    assert ops == [("open", "2-3"), ("open", "3-23"), ("open", "6-26"), ("open", "9-10"),
-                   ("close", "1-2")]
-    _, executed = restore(falkordb, graph, incident_id, approve=lambda plan: True)
-    assert executed["critical"] == ["fire station"]
+    apply_fault(graph, "4-5")
+    incident_id = declare_fault(graph, [3], "1-2 and 2-3 set")
+    # 6-7 cannot open, so the agent's first isolation fails and Z7 has to go with the fault.
+    usual = run_plan(falkordb, graph, incident_id, kind="isolation",
+                     open=["2-3", "3-23", "6-7", "6-26"], close=["1-2"])
+    assert usual.violations[0][0] == "operability"
+    assert run_plan(falkordb, graph, incident_id, kind="isolation", **Z3_ISOLATION).passed
+    assert 14 in run_plan(falkordb, graph, incident_id, close=["12-22"]).restored_zones
 
     explanation = explain_incident(graph, incident_id)
     assert explanation["cut_off"] == [{"zone": 7, "via": "6-7"}]
@@ -71,37 +67,35 @@ def test_a_switch_jammed_on_patrol_cuts_its_neighbour_out_with_the_fault(falkord
     assert "6-7 is jammed" in hospital["reason"]
 
 
-def test_planning_never_operates_a_jammed_switch_or_feeds_a_cut_off_zone(graph, fixed_model):
+def test_feeding_a_zone_cut_off_by_a_jam_reenergizes_the_fault(falkordb, graph, fixed_model):
     file_report(graph, fixed_model(reply(("6-7", False, "it is JAMMED shut"))), "m", NOTE)
-    isolated(graph, "4-5")
+    apply_fault(graph, "4-5")
+    incident_id = declare_fault(graph, [3], "1-2 and 2-3 set")
+    run_plan(falkordb, graph, incident_id, kind="isolation", **Z3_ISOLATION)
 
-    for candidate in generate_candidates(graph):
-        switches = {o.switch_id for o in candidate.ops}
-        # 8-21 and 9-15 are the ties into the cut-off Z7.
-        assert not switches & {"6-7", "8-21", "9-15"}
-        assert 7 not in candidate.claims
+    # 8-21 would feed Z7, and through the jammed 6-7 the faulted Z3 behind it.
+    into_z7 = run_plan(falkordb, graph, incident_id, close=["8-21"])
+    assert "isolation" in {kind for kind, _ in into_z7.violations}
+    assert run_plan(falkordb, graph, incident_id, close=["12-22"]).passed
 
 
 def test_a_jam_found_mid_incident_rejects_the_plans_that_need_it(falkordb, graph, fixed_model):
-    incident_id, _ = isolated(graph, "4-5")
-    plan_restoration(falkordb, graph, incident_id)
-    users = {p["plan_id"] for p in plan_details(graph, incident_id)
-             if p["status"] == "verified" and any(o["switch_id"] == "12-22" for o in p["ops"])}
-    assert users
+    incident_id = isolated(graph, "4-5")
+    plan = verify_plan(falkordb, graph, incident_id, "inc1-p1",
+                       [SwitchOp("13-14", "open"), SwitchOp("12-22", "close")])
+    assert plan.passed
 
     note = "Crew at the 12-22 tie: it will not close, the spring mechanism is broken."
     report = file_report(graph, fixed_model(reply(("12-22", False, "it will not close"))), "m", note)
 
-    assert set(report["rejected_plans"]) == users
+    assert report["rejected_plans"] == [plan.plan_id]
     details = {p["plan_id"]: p for p in plan_details(graph, incident_id)}
-    for plan_id in users:
-        assert details[plan_id]["status"] == "rejected"
-        assert details[plan_id]["violations"][-1]["type"] == "operability"
-    assert all("12-22" not in {o.switch_id for o in c.ops} for c in generate_candidates(graph))
+    assert details[plan.plan_id]["status"] == "rejected"
+    assert details[plan.plan_id]["violations"][-1]["type"] == "operability"
 
 
 def test_verification_refuses_a_plan_that_operates_a_jammed_switch(falkordb, graph, fixed_model):
-    incident_id, _ = isolated(graph, "4-5")
+    incident_id = isolated(graph, "4-5")
     file_report(graph, fixed_model(reply(("8-21", False, "8-21 is seized"))), "m", "8-21 is seized")
 
     result = verify_plan(falkordb, graph, incident_id, "inc1-px", [SwitchOp("8-21", "close")])
@@ -110,13 +104,15 @@ def test_verification_refuses_a_plan_that_operates_a_jammed_switch(falkordb, gra
                                     "8-21 is jammed and cannot be operated (crew report cr1)")
 
 
-def test_a_repair_report_frees_the_switch(graph, fixed_model):
+def test_a_repair_report_frees_the_switch(falkordb, graph, fixed_model):
     file_report(graph, fixed_model(reply(("6-7", False, "it is JAMMED shut"))), "m", NOTE)
     file_report(graph, fixed_model(reply(("6-7", True, "6-7 freed and tested"))), "m",
                 "Switch 6-7 freed and tested, works normally.")
     assert jammed_switches(graph) == []
-    _, ops = isolated(graph, "4-5")
-    assert ("open", "6-7") in ops
+    apply_fault(graph, "4-5")
+    incident_id = declare_fault(graph, [3], "1-2 and 2-3 set")
+    assert run_plan(falkordb, graph, incident_id, kind="isolation",
+                    open=["2-3", "3-23", "6-7", "6-26"], close=["1-2"]).passed
 
 
 def test_a_bad_reply_changes_nothing(graph, fixed_model):

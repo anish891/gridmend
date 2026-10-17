@@ -1,6 +1,6 @@
 import pytest
 
-from gridmend.flisr.locate import LocateError, locate_fault
+from eval.isolation import LocateError, locate_fault
 from gridmend.sim import apply_fault
 
 from conftest import segment_ids

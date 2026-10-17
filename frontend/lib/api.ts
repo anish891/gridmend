@@ -43,26 +43,8 @@ export type CrewFinding = { switch_id: string; operable: boolean; evidence: stri
 
 export type CrewReport = { id: string; note: string; other: string; findings: CrewFinding[] };
 
-export type WhatIfOutcome = {
-  isolation: string[];
-  cut_off: { zone: number; via: string }[];
-  plans_checked: number;
-  plans_passed: number;
-  plan: { ops: string[]; restored_kw: number; min_v_pu: number; max_loading_pct: number } | null;
-  restored_kw: number;
-  critical_restored: string[];
-  critical_dark: string[];
-};
-
-export type WhatIf = {
-  switches: string[];
-  fault_line: string | null;
-  as_is: WhatIfOutcome;
-  jammed: WhatIfOutcome;
-  kw_change: number;
-  critical_lost: string[];
-  critical_gained: string[];
-};
+// A switch as the agent's zone map reports it, with the fault indicator it read.
+export type ZoneSwitch = { id: string; kind: string; status: string; indicator?: "set" | "clear" };
 
 export type SwitchingStep = {
   step: number;
@@ -92,8 +74,8 @@ export type Violation = { type: string; detail: string };
 
 export type Candidate = {
   plan_id: string;
-  // Who designed the plan: one of the generators, the agent, or an operator at the CLI.
-  origin: "greedy" | "tie-only" | "repaired" | "agent" | "manual" | null;
+  // Who designed the plan: the agent, or an operator simulating by hand at the CLI.
+  origin: "agent" | "manual" | null;
   score: number;
   ops: SwitchOp[];
   passed: boolean;
@@ -109,8 +91,8 @@ export type Candidate = {
 
 export type PlanResult = { incident: string; recommended: string | null; candidates: Candidate[] };
 
-// One round of fault location: every faulted zone the indicators point to, with its chain.
-export type Location = { zone: number; chain: string[]; zones: number[]; chains: Record<string, string[]> };
+// One round of fault location: the zones the agent declared faulted and the readings it cited.
+export type Location = { zones: number[]; evidence: string };
 
 export type CriticalLoad = {
   bus: number;
@@ -126,6 +108,8 @@ export type Explanation = {
   status: string;
   faulted_zone: number;
   faulted_zones: number[];
+  // The agent's own reading of the indicators that led it to the faulted zones.
+  evidence: string | null;
   isolation: string[];
   switching_order: SwitchingStep[];
   plan: {
@@ -136,8 +120,9 @@ export type Explanation = {
     max_loading_pct: number;
     paths: Record<string, string[]>;
   } | null;
-  rejected: { id: string; origin: Candidate["origin"]; ops: string[]; violations: string[] }[];
-  transfer: { demand_kva: number; deliverable_kva: number; shortfall_kva: number; bottlenecks: string[] };
+  rejected: { id: string; kind: "isolation" | "restoration"; ops: string[]; violations: string[] }[];
+  // Null when FalkorDB's max-flow could not be computed for the configuration.
+  transfer: { demand_kva: number; deliverable_kva: number; shortfall_kva: number; bottlenecks: string[] } | null;
   critical: CriticalLoad[];
   crew_reports: CrewReport[];
   cut_off: { zone: number; via: string }[];
@@ -257,11 +242,9 @@ async function call<T>(method: "GET" | "POST" | "DELETE", path: string, body?: u
 export const api = {
   state: () => call<GridState>("GET", "/state"),
   fault: (lines: string[]) => call<{ lines: string[]; indicators_set: string[] }>("POST", "/fault", { lines }),
-  locate: () => call<Location>("POST", "/locate"),
-  // tripped_again: reclosing fed a fault hidden upstream, so it must be located and isolated too.
-  isolate: () => call<{ incident: string; ops: SwitchOp[]; tripped_again: boolean }>("POST", "/isolate"),
-  plan: () => call<PlanResult>("POST", "/plan"),
-  execute: (planId: string) => call<{ plan_id: string; ops: SwitchOp[] }>("POST", "/execute", { plan_id: planId }),
+  // tripped_again: the switching fed a fault after all, so the breaker opened again.
+  execute: (planId: string) =>
+    call<{ plan_id: string; ops: SwitchOp[]; tripped_again: boolean }>("POST", "/execute", { plan_id: planId }),
   explain: () => call<Explanation>("GET", "/explain"),
   trace: () => call<Trace>("GET", "/trace"),
   results: () => call<Results>("GET", "/results"),
@@ -276,6 +259,4 @@ export const api = {
   reconnectGeneration: () => call<{ reconnected: number[]; replan: boolean }>("POST", "/generation/reconnect"),
   crewReports: () => call<{ reports: CrewReport[] }>("GET", "/crew"),
   fileCrewReport: (note: string) => call<CrewFiling>("POST", "/crew", { note }),
-  whatIf: (switches: string[], faultLine: string | null) =>
-    call<WhatIf>("POST", "/whatif", { switches, fault_line: faultLine }),
 };

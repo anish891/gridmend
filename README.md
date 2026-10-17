@@ -1,24 +1,25 @@
 # GridMend: a self-healing grid agent on a FalkorDB twin
 
-> **100% of the best possible restoration, with 0 unsafe plans, across all 23 single faults.**
-> A language model planning the same faults alone, without the graph and the verifier, produced
-> unsafe switching in 20 of 23. GridMend plans from the graph, checks every plan on a forked copy
-> of it, and only then acts.
+> **An LLM agent that locates, isolates and restores faults on its own, with 0 unsafe plans across
+> all 23 single faults and 85% of the best possible restoration.** The same model planning alone,
+> without the graph and the simulator, produced unsafe switching in 20 of 23.
 
-GridMend restores power after a fault on a distribution feeder. It locates the fault from
-fault-indicator readings, isolates it, searches the graph for ways to re-feed the healthy
-areas, checks every candidate on a forked copy of the graph, and only then lets an operator
-(or an LLM operator agent) execute a plan. Every decision is written back into the graph, so
-any restoration can be explained afterwards, path by path.
+GridMend is an LLM agent that restores power after a fault on a distribution feeder, working on
+a digital twin of the feeder held in FalkorDB. The agent does the operator's thinking: it reads
+the fault-indicator readings and decides where the fault is, writes the switching that isolates
+it, and designs how to re-feed the healthy areas, revising each design when the twin shows it
+would close a loop, overload a line or drop voltage. Nothing deterministic decides for it. What
+stands between the model and the real switches is physics and an interlock: every plan it writes
+is applied to a forked copy of the graph and checked there, only plans that pass can move a live
+switch, and if it misreads the indicators, reclosing onto the fault trips the breaker again and
+it has to think again. Every decision is written back into the graph, so any restoration can be
+explained afterwards, path by path.
 
-It also acts on what people tell it in plain words. A field crew reports a jammed switch, and
-GridMend isolates and replans around it.
-An operator asks "what if 6-7 won't open?" and gets the answer from throwaway copies of the
-graph. The LLM only proposes; deterministic code checks every value before it reaches the graph.
-
-And it answers questions. **Ask the grid** takes "which line is most critical right now?" or "how
-is the hospital fed?", lets the LLM chain read-only graph tools to find out, answers with the
-evidence and the tools it used, and highlights the path or lines it relied on on the map.
+It also acts on what people tell it in plain words. A field crew reports a jammed switch, and the
+agent isolates and restores around it. And it answers questions: **Ask the grid** takes "which
+line is most critical right now?" or "how is the hospital fed?", lets the LLM chain read-only
+graph tools to find out, answers with the evidence and the tools it used, and highlights the
+path or lines it relied on on the map.
 
 **Track:** 01, Agents That Act on Connected Data.
 
@@ -31,23 +32,20 @@ evidence and the tools it used, and highlights the path or lines it relied on on
   ```
 
 * **Live demo:** https://gridmend.onrender.com. It runs on Render's free tier (0.1 CPU) and sleeps
-  when idle, so the first visit takes about half a minute to wake it. After that a fault is
-  planned and verified in a few seconds; the LLM agent mode takes about a minute.
+  when idle, so the first visit takes about half a minute to wake it. The agent then takes a
+  minute or two per fault.
 
 Use the **network switch** in the top bar to move between the IEEE 33-bus test feeder and a real
-177-bus, two-substation 20 kV network (Oberrhein). Press **Play the demo** for a 30-second guided
-run of a fault, or pick a demo fault (or click any line). **Two faults at once** shows faults on two
-branches found together, and a fault hidden behind another that only shows when the breaker
-recloses onto it. After the main-line fault is restored, **Reconnect the solar plant** brings the
-500 kW plant on the 19-22 lateral back online: its output relieves line 2-19, and a second
-restoration stage picks up zone Z10 as well. Watch the indicators, isolation
-and switching replay on the map, select a plan to see it (or why it failed) on the map, and
-approve one that passed. File a crew note such as "the sectionalizer between 6 and 7 is jammed
-shut" and fault 4-5 again to see the hospital's zone cut out with the fault. Ask **What if a
-switch won't operate?** to compare outcomes without touching the live grid. Switch the map to
-**Risk map** to see every line coloured by what a fault there would leave dark. The **Graph** tab
-shows the live Cypher behind every step and what it returns right now. Ask the grid a question
-in plain words below the map.
+177-bus, two-substation 20 kV network (Oberrhein). Press **Play the demo**, pick a demo fault or
+click any line, and watch the agent work: the indicators it reads light up, its isolation replays
+on the map, and every restoration design it tries appears with the reason it failed or passed.
+**Two faults at once** includes a fault hidden behind another, which only shows when reclosing
+trips the breaker again. Approve the plan the agent recommends (or another that passed). After
+the main-line fault is restored, **Reconnect the solar plant** brings the 500 kW plant on the
+19-22 lateral back online and the agent plans a second stage. File a crew note such as "the
+sectionalizer between 6 and 7 is jammed shut" and fault 4-5 again to see the agent isolate around
+it. Switch the map to **Risk map** to see every line coloured by what a fault there would leave
+dark. The **Graph** tab shows the live Cypher behind every tool and what it returns right now.
 
 ![GridMend after a fault on 4-5: hospital and fire station re-fed through ties 8-21 and 9-15](docs/feeder.png)
 
@@ -68,70 +66,58 @@ of the field arrives as crew notes, not as clean data.
 
 ## What GridMend does
 
-| Step | What happens | Where the graph does the work |
+| Step | Who decides | What the graph provides |
 |---|---|---|
-| Locate | Follow the chain of tripped fault indicators from the substation | Zone whose upstream indicator is set and downstream ones are clear |
-| Isolate | Open the faulted zone's boundary switches, reclose the breaker; a zone tied to the fault by a jammed switch is cut out with it | Switches with exactly one end in the isolated region; traversal across jammed closed switches |
-| Plan | The agent designs switching plans from the zone map and revises them on the verifier's violations; graph searches generate candidates to cross-check its designs, or to plan alone without an LLM | Zones and the switches that join them; what-if energization, radiality and line loading for each tie subset |
-| Verify | Apply each plan to `GRAPH.COPY` of the live graph and check operability, isolation, connectivity, radiality, capacity and voltage | A fork per plan; power flow on the forked configuration |
-| Decide | Rank verified plans by the critical sites they restore, then load restored, then fewest operations | `RESTORES` edges from each plan to zones, critical weights on buses |
-| Act | Execute the approved plan on the live graph | Only plans whose status is `verified` |
-| Explain | Feeding path of every restored zone, margins, rejected alternatives, why each critical site is lit or dark, the crew reports in force, and a numbered switching order | Stored decision trace |
+| Locate | The agent reads every switch's fault indicator and the zones it joins, and declares the faulted zone with its evidence | `zone_map`: switches, indicator states and the zones on each side |
+| Isolate | The agent writes the switching that cuts the zone out and recloses the breaker, working around jammed switches | A fork to simulate it on; protection on the live twin trips again if power reaches the fault |
+| Restore | The agent designs which ties to close and which sectionalizers to open, and revises against each failed check | Zones, loads, critical sites and switch ratings; `transfer_capacity` (max flow) for the upper bound |
+| Simulate | Code applies every plan to `GRAPH.COPY` of the live graph: operability, isolation, connectivity, radiality, capacity, voltage | A fork per plan; power flow on the forked configuration |
+| Act | The interlock: only plans that passed simulation move live switches; restoration waits for the operator's approval | `Plan.status` is `verified` |
+| Explain | The agent explains; the graph keeps feeding paths, margins, rejected designs, the evidence it read and a numbered switching order | Stored decision trace |
 
-The LLM never writes Cypher and never flips a switch. As the operator agent it calls fifteen
-tools, designs its own restoration plans, revises them until the fork verifier passes them,
-compares them with generated plans, and explains the choice using only facts the tools
-returned. As a reader it turns crew notes into structured values that code
-validates before writing. All writes to the graph are deterministic code.
+The LLM never writes Cypher and never flips a switch directly: it calls thirteen tools that read
+the twin, simulate on forks and execute plans that passed. Simulation and protection are physics,
+not rules: they say what the switching would do, never what to do. As a reader it also turns crew
+notes into structured values that code validates before writing.
 
 ### Example: fault on line 4-5 (zone Z3)
 
-* The breaker trips and all 33 buses go dark. Indicators on 1-2 and 2-3 read set, all
-  others clear, so the fault is in Z3.
-* Isolation opens 2-3, 3-23, 6-7 and 6-26 and recloses 1-2: Z2 and Z19 come back.
-* Candidates, each verified on its own fork:
+From a live run with `openai.gpt-oss-120b` on Amazon Bedrock:
+
+* The breaker trips and all 33 buses go dark. The agent reads the indicators: 1-2 and 2-3 set,
+  everything beyond clear, so it declares Z3.
+* It writes the isolation (open 2-3, 3-23, 6-7 and 6-26, close 1-2), simulates it, and executes
+  it: Z2 and Z19 come back.
+* It designs restoration and revises on the twin's answers:
   * close 8-21 alone: rejected, line 2-19 would carry 1584 kVA of 1400 (113%);
-  * close 8-21 and 12-22: rejected, closes a loop;
-  * open 9-10 and 13-14, close 8-21 and 9-15: **passes**, restores the hospital (Z7) and the
-    fire station (Z14) at 95% loading and 0.946 pu;
-  * open 13-14, close 12-22: passes, but restores only the hospital.
-* The plan with both critical sites is executed. Water pumping stays dark (no tie reaches a
-  live zone) and so does telecom (closing 18-33 from Z14 would overload the path through 2-19).
+  * open 13-14, close 8-21: passes, but leaves the fire station dark;
+  * open 9-10 and 13-14, close 8-21 and 9-15: **passes**, feeding the hospital (Z7) and the fire
+    station (Z14) over two ties at 95% loading and 0.946 pu.
+* It recommends the plan with both critical sites; water pumping stays dark (no tie reaches a
+  live zone) and so does telecom (the path through 2-19 has no capacity left).
 
-The same fault with a jammed switch:
-
-* **Switch 6-7 reported jammed shut.** Isolation cannot open 6-7, so Z7 (the hospital) is cut out
-  with the fault and 9-10 opens instead. The ties into Z7 are never planned. The best safe plan
-  closes 12-22 and restores the fire station's zone: 615 kW instead of 850, which the what-if
-  shows before the fault ever happens.
+If the agent misreads the indicators and isolates the wrong zone, its simulation still passes
+(the fork knows only its diagnosis), but executing it recloses onto the real fault: the breaker
+trips again, the indicators change, and the agent has to locate again. The same happens, by
+design, with a second fault hidden upstream of the first.
 
 ## What the LLM does, and what it does not
 
-The LLM is the operator's assistant, not the controller. It has two jobs, and each one ends
-at a deterministic check.
-
-* **Operator agent.** It decides which tools to call and in what order: field reports, locate,
-  isolate, then design. From `zone_map` (dark zones, their load and critical sites, and the
-  switches that join zones) it proposes which ties to close and which sectionalizers to open,
-  and sends each design to `verify_plan`. A failed check comes back as a violation (a loop, an
-  overload on 2-19 with its loading, buses below 0.90 pu) and the agent revises against it.
-  Only after it has verified a design of its own does `restoration_candidates` hand it the
-  generated plans to compare. It chooses among verified plans, its own or generated (most
-  critical sites restored, then most load, then fewest switch operations), and justifies the
-  choice. `recommend_plan` refuses a plan that did not pass verification, and every design,
-  the choice and the reason are written into the decision trace, each plan marked with who
-  designed it.
+* **Operator agent.** It handles the incident end to end. It decides which tools to call and in
+  what order, reads the indicators and declares the fault (`declare_fault`), writes the isolation
+  and restoration switching and tests each with `simulate_plan`, reads the violations (a loop, an
+  overload on 2-19 with its loading, buses below 0.90 pu, a jammed switch) and revises. It
+  chooses among plans that passed (most critical sites restored, then most load, then fewest
+  switch operations) and explains the choice. On the command line it executes with your
+  approval; in the web UI it isolates on its own and recommends the restoration, and you
+  approve it.
 * **Crew-note reader.** From a crew's free-text note it lists the switches the note says are
   jammed or repaired, with the evidence. Code accepts a finding only if the switch exists, the
   evidence is quoted from the note itself, and any position the note states matches the twin.
-  A note that says a closed switch is "stuck open" is refused until the operator confirms where
-  it really is.
 
-It never writes Cypher, never flips a switch, never decides whether a plan is safe (the fork
-verifier does), and in the web UI it never executes: the operator does. Without an LLM, the same
-pipeline runs with the same ranking done deterministically, which is what the evaluation's
-`gridmend` row uses. The evaluation's `llm-only` row shows what happens when a model plans
-without the graph and the verifier: 20 of 23 plans unsafe.
+It never writes Cypher, never moves a switch except through a plan that passed simulation, and
+never decides whether a plan is safe: the fork does. The evaluation's `llm-only` row shows what
+happens when a model plans without the graph and the simulator.
 
 ## Why FalkorDB is load-bearing
 
@@ -139,15 +125,12 @@ Remove FalkorDB and nothing is left: no twin, no forks, no paths, no trace.
 
 * **Zones** are connected components over unswitched segments (`algo.WCC` filtered to `SEG`).
 * **Energization** is reachability from the substation over segments and closed switches.
-* **Fault location** is the zone at the end of the chain of set indicators.
-* **Isolation around a jammed switch** is a traversal: from the faulted zone, across every closed
-  switch a crew reported jammed, to the zones that must be cut out with it.
-* **Restoration** is a search between dead and live zones over `BOUNDARY` edges, skipping jammed
-  switches and cut-out zones, screened with parameterised what-if traversals that never touch
-  the live state.
+* **The agent's view** (`zone_map`) is one query over switches, their indicators and the zones
+  on each side: the evidence it locates from and the map it designs on.
+* **Protection** is a traversal on the live twin: if any faulted segment is energized after a
+  switching, the breaker on the path trips and the indicators along it are set again.
 * **Line dependencies** come from the same traversal: for every line, the buses, load and
-  critical facilities downstream of it right now. The agent can call it as a tool
-  (`line_dependencies`), and the diagram shows it on hover.
+  critical facilities downstream of it right now.
 * **Line loading** is computed in one query: every energized bus has exactly one path from the
   source in a radial feeder, so a line carries the load of the buses whose path uses it.
 * **Radiality** is a minimum spanning forest (`algo.MSF`) on the conducting edges of a fork: any
@@ -155,16 +138,14 @@ Remove FalkorDB and nothing is left: no twin, no forks, no paths, no trace.
 * **Transfer limit** is `algo.maxFlow` from the substation to every healthy load: the most any
   switching could restore, and the lines that cap it.
 * **Safety** comes from a forked graph per plan (`GRAPH.COPY`), checked before any switch moves.
-  A what-if forks the whole grid twice, with and without the jam, and plans on both.
-* **Explainability** comes from the decision trace stored next to the grid: incidents, plans,
-  switch operations, violations, the zones each plan restores, and the crew reports an incident
-  took into account.
+* **Explainability** comes from the decision trace stored next to the grid: incidents with the
+  agent's evidence, every plan it simulated, switch operations, violations, the zones each plan
+  restores, and the crew reports it took into account.
 
 ## Graph data model
 
 Graphs: `grid_base` (pristine feeder, used for reset), `grid_live` (current state and decision
-trace), `fork_<planId>` (temporary, deleted after verification) and `whatif_*` (temporary,
-deleted after a what-if).
+trace) and `fork_<planId>` (temporary, deleted after simulation).
 
 ```
 (:Bus {id, pp_index, p_kw, q_kvar, s_kva, critical, facility, weight, zone, energized, is_source})
@@ -178,13 +159,13 @@ deleted after a what-if).
 
 (:CrewReport {id, note, other, model, ts})-[:FINDS]->(:Finding {switch_id, operable, evidence})
 
-(:Incident {id, ts, fault_line, status})-[:FAULT_IN]->(:Zone)
+(:Incident {id, ts, fault_line, status, evidence})-[:FAULT_IN]->(:Zone)   evidence: the agent's reading
 (:Incident)-[:HAS_REPORT]->(:CrewReport)
 (:Incident)-[:CUTS_OFF {via}]->(:Zone)                    healthy zone isolated with the fault
 (:Incident)-[:HAS_PLAN]->(:Plan {id, kind, status, origin, switch_ops, restored_kw, restored_weighted,
                                  min_v_pu, max_loading_pct, recommended, recommendation})
         kind: isolation | restoration     status: verified | rejected | executed
-        origin: agent | greedy | tie-only | repaired | manual    (who designed it)
+        origin: agent | manual    (the agent, or an operator simulating by hand)
 (:Plan)-[:STEP]->(:SwitchOp {seq, switch_id, op})
 (:Plan)-[:VIOLATES]->(:Violation {type, detail})
 (:Plan)-[:RESTORES]->(:Zone)
@@ -219,59 +200,22 @@ WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
 RETURN DISTINCT b.id
 ```
 
-Fault location: the zone whose upstream indicator is set and whose downstream indicators are
-all clear ([locate.py](backend/gridmend/flisr/locate.py)).
+What the agent reads: every switch with its state, indicator and the zones on each side
+([zones.py](backend/gridmend/grid/zones.py)).
 
 ```cypher
-MATCH (:Bus)-[up:SW]->(:Bus)-[:IN_ZONE]->(z:Zone)
-WHERE up.kind <> 'tie' AND up.fi = 'set'
-OPTIONAL MATCH (b:Bus)-[:IN_ZONE]->(z), (b)-[down:SW]->(:Bus)
-WHERE down.kind = 'sectionalizer' AND down.fi = 'set'
-WITH z, count(down) AS set_downstream
-WHERE set_downstream = 0
-RETURN z.id
+MATCH (x:Bus)-[s:SW]->(y:Bus)-[:IN_ZONE]->(zb:Zone)
+OPTIONAL MATCH (x)-[:IN_ZONE]->(za:Zone)
+RETURN s.id, s.kind, s.status, s.operable, s.cap_kva, s.fi, za.id AS from_zone, zb.id AS to_zone
+ORDER BY s.kind, s.id
 ```
 
-Isolation ([isolate.py](backend/gridmend/flisr/isolate.py)): first grow the region to cut out,
-repeating until it stops growing. A zone joined to it by a jammed closed switch cannot be
-separated from the fault.
+Protection after a switching ([sim.py](backend/gridmend/sim.py)): any faulted segment with
+power trips the breaker on its path from the source.
 
 ```cypher
-MATCH (b:Bus)-[:IN_ZONE]->(z:Zone), (b)-[s:SW]-(:Bus)-[:IN_ZONE]->(o:Zone)
-WHERE z.id IN $zones AND NOT o.id IN $zones AND s.status = 'closed' AND s.operable = false
-RETURN DISTINCT o.id, s.id
-```
-
-Then open every closed switch with exactly one end in the region.
-
-```cypher
-MATCH (b:Bus)-[:IN_ZONE]->(z:Zone), (b)-[s:SW]-(o:Bus)
-WHERE z.id IN $zones AND s.status = 'closed' AND NOT coalesce(o.zone, -1) IN $zones
-RETURN s.id, endNode(s) = b AS upstream
-```
-
-Restoration options: dead healthy zones a working tie connects to a live zone
-([candidates.py](backend/gridmend/flisr/candidates.py)).
-
-```cypher
-MATCH (d:Zone {energized: false, faulted: false})-[b:BOUNDARY {kind: 'tie'}]-
-      (:Zone {energized: true, faulted: false})
-WHERE NOT coalesce(d.cut_off, false)
-MATCH ()-[s:SW {id: b.switch_id}]->()
-WHERE coalesce(s.operable, true)
-RETURN d.id, b.switch_id
-ORDER BY d.weighted_kw DESC, b.switch_id
-```
-
-What-if screening of a candidate configuration without forking: the proposed closed-switch set
-is a parameter.
-
-```cypher
-MATCH (s:Bus {is_source: true})
-MATCH p = (s)-[:SEG|SW*0..40]-(b:Bus)
-WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.id IN $closed)
-RETURN b.id, b.zone, b.p_kw, b.q_kvar,
-       [r IN relationships(p) | r.id], [r IN relationships(p) | r.cap_kva]
+MATCH (a:Bus {energized: true})-[:SEG {faulted: true}]->(:Bus)
+RETURN a.id
 ```
 
 Line loading on a fork: in a radial feeder each energized bus has one path from the source, so
@@ -305,7 +249,8 @@ RETURN size(nodes), collect(r.id)
 
 Forking is `GRAPH.COPY grid_live fork_<planId>`. The checks run on the fork, the outcome is
 written to `grid_live` as a `Plan` with `STEP`, `VIOLATES` and `RESTORES` edges, and the fork is
-deleted.
+deleted. An isolation plan is checked the same way; it claims no zones, only that the declared
+faulted zones stay dark and everything it re-energizes is safe.
 
 Transfer limit on a throwaway copy where every line is a pair of `FLOW` edges and every healthy
 load drains into one sink ([transfer.py](backend/gridmend/flisr/transfer.py)).
@@ -335,35 +280,38 @@ ORDER BY length(p) LIMIT 1
 ## Evaluation
 
 All 23 single faults on unswitched segments of the IEEE 33-bus feeder, five methods
-(`gridmend eval --llm-only`):
+(`gridmend eval --agent --llm-only`):
 
-| method | restored kW | % of optimal | critical loads | switch ops | violations | unsafe plans | mean planning ms |
+| method | restored kW | % of optimal | critical loads | switch ops | violations | unsafe plans | mean time ms |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | isolate-only | 0 | 0.0 | 0 | 0 | 0 | 0 | 0 |
-| greedy | 0 | 0.0 | 0 | 16 | 26 | 11 | 10 |
+| greedy | 0 | 0.0 | 0 | 16 | 26 | 11 | 0 |
 | llm-only | 1170 | 23.6 | 3 | 59 | 26 | 20 | 14883 |
-| **gridmend** | **4950** | **100.0** | **11** | **17** | **0** | **0** | **491** |
-| optimal | 4950 | 100.0 | 11 | 17 | 0 | 0 | 314 |
+| **agent** | **4230** | **85.5** | **8** | **13** | **0** | **0** | **22430** |
+| optimal | 4950 | 100.0 | 11 | 17 | 0 | 0 | 64 |
 
 ![Results page](docs/results.png)
 
-* **isolate-only** restores nothing beyond isolation (lower bound).
-* **greedy** closes the first tie into each dead zone without verification, as an operator
-  might by reflex.
-* **llm-only** gives `qwen/qwen3.8-27b` a text description of the isolated feeder and no tools;
-  its switching is executed unchecked and scored by the verifier.
+* **agent** is GridMend: `openai.gpt-oss-120b` on Amazon Bedrock starts from the tripped breaker,
+  reads the indicators, isolates, and designs and executes the restoration through the tools,
+  with no deterministic planner. Its final configuration is re-checked by the oracle.
+* **isolate-only**, **greedy** and **llm-only** start from a standard isolation (kept in
+  [`eval/isolation.py`](backend/eval/isolation.py) for the baselines only). **greedy** closes the
+  first tie into each dead zone without checking; **llm-only** gives `qwen/qwen3.8-27b` a text
+  description of the isolated feeder and no tools, and its switching is executed unchecked.
 * **optimal** is a brute-force oracle over every switch combination, written with networkx and
-  pandapower only and never reading FalkorDB. It also re-checks every configuration GridMend
-  executes.
+  pandapower only and never reading FalkorDB.
 
-Unsafe switching is scored as restoring nothing, since protection would trip it. On a feeder this
-small, GridMend's search over all tie subsets reaches the optimum; the point of the table is
-that it does so with zero violations, every plan verified on a fork, in well under a second.
-Planning times depend on the machine. The `llm-only` baseline needs a model endpoint and is not
-deterministic, so `gridmend eval --llm-only` records its rows in
-[`backend/eval/llm_only.csv`](backend/eval/llm_only.csv) and every later `gridmend eval`, including
-the image build, replays them. The Results page also shows, as a faded bar, the load each unsafe
-plan claimed it would restore before the verifier caught it.
+Unsafe switching is scored as restoring nothing, since protection would trip it. The agent
+located and isolated every fault correctly on its own and never executed an unsafe plan; where it
+falls short of the optimum (faults 3-4, 4-5 and 5-6), it settled for a safe plan that restores the
+hospital but not the fire station, instead of finding the two-tie split that restores both. Its
+time is the whole incident, from the tripped breaker to the executed restoration, through a
+hosted model. Model-driven rows are not deterministic, so `gridmend eval --agent` and
+`--llm-only` record their rows in [`agent.csv`](backend/eval/agent.csv) and
+[`llm_only.csv`](backend/eval/llm_only.csv), and every later `gridmend eval`, including the image
+build, replays them. The Results page also shows, as a faded bar, the load each unsafe plan
+claimed it would restore.
 
 ### Scaling to a real network
 
@@ -379,37 +327,31 @@ Graph pages. Every API call names its feeder (`?feeder=oberrhein`). From the com
 ```bash
 export GRIDMEND_FEEDER=oberrhein
 gridmend load                              # writes oberrhein_base and oberrhein_live
-gridmend run 13-19 --auto                  # a fault trips only its own feeder's breaker
-gridmend eval                              # every segment; writes backend/eval/out/oberrhein/
+gridmend agent 13-19 --auto                # a fault trips only its own feeder's breaker
+gridmend eval                              # baselines on every segment; backend/eval/out/oberrhein/
 ```
 
-Over all 155 single faults:
-
-| method | restored kW | unsafe plans | mean planning ms |
-|---|---:|---:|---:|
-| isolate-only | 0 | 0 | 0 |
-| greedy | 167490 | 44 | 17 |
-| **gridmend** | **387318** | **0** | **318** |
-
-Greedy's unsafe switching claimed 409 MW, more than GridMend restored safely, but 44 of its plans
-would have tripped. The brute-force oracle handles one substation, so there is no optimum here;
-GridMend's plans rest on the fork checks alone, which also catch a plan that would join the two
-substations into one network.
+The agent works the real network through the same tools: zones and indicators come from the
+graph exactly as on the 33-bus feeder, and the fork checks also catch a plan that would join the
+two substations into one network. Running the agent over all 155 single faults would take hours
+of model time, so the Oberrhein results page shows the baselines only; the brute-force oracle
+handles one substation, so there is no optimum here either.
 
 ## Architecture
 
-![GridMend architecture: the UI, MCP clients and the LLM reach the grid only through agent tools; a deterministic pipeline verifies every plan on a FalkorDB fork before it runs](docs/architecture.svg)
+![GridMend architecture: the UI, MCP clients and the LLM reach the grid only through agent tools; every plan the agent writes is simulated on a FalkorDB fork before it can run](docs/architecture.svg)
 
 Where each part lives:
 
 ```
 gridmend.grid   load, zones, energization (case data -> graph)
-gridmend.flisr  locate, isolate, candidates, verify (+ pandapower), execute, explain, trace,
-                transfer (max flow), crew reports, what-if
-gridmend.agent  15 tools --+-- LLM operator loop and Ask the grid (any OpenAI-compatible endpoint)
+gridmend.flisr  declare (the agent's diagnosis), simulate (+ pandapower), interlocked execute,
+                explain, trace, transfer (max flow), crew reports
+gridmend.agent  13 tools --+-- LLM operator loop and Ask the grid (any OpenAI-compatible endpoint)
                            +-- MCP server (stdio)
 gridmend.api    HTTP API --+-- Next.js + Cytoscape UI
-eval            scenario runner, baselines, networkx/pandapower oracle
+eval            scenario runner, the agent row, baselines (with their own deterministic isolation
+                and greedy switching), networkx/pandapower oracle
 ```
 
 ## Run it locally
@@ -425,17 +367,15 @@ uv venv -p 3.12 .venv && source .venv/bin/activate
 uv pip install -e '.[test]'
 gridmend ping                              # OK
 gridmend load                              # writes grid_base and grid_live
-gridmend run 4-5 --auto                    # fault -> locate -> isolate -> plan -> execute -> explain
+gridmend agent 4-5 --auto                  # the agent locates, isolates and restores
 gridmend reset
-gridmend run 4-5 16-17 --auto              # two faults: the upstream one shows only on reclosing
-gridmend reset
-gridmend run 4-5 --auto                    # stage 1: hospital and fire station
+gridmend agent 4-5 --auto                  # stage 1: hospital and fire station
 gridmend dg --reconnect                    # solar on bus 21 returns once its zone has power
-gridmend plan                              # stage 2: its output frees line 2-19 for zone Z10
+gridmend agent --auto                      # stage 2: the agent plans again on the same incident
 gridmend reset
-gridmend whatif 6-7 --fault 4-5            # what a jammed 6-7 would cost, on copies of the grid
-pytest                                     # 152 tests, on scratch graphs
-gridmend eval                              # writes backend/eval/out/results.{csv,md}
+pytest                                     # 139 tests, on scratch graphs, with scripted models
+gridmend eval                              # baselines + the recorded agent rows
+gridmend eval --agent                      # run the agent on all 23 faults and record it
 gridmend api                               # HTTP API on :8000
 
 cd ../frontend
@@ -444,8 +384,8 @@ npm run dev                                # UI on http://localhost:3001
 ```
 
 Other commands: `basecase`, `zones`, `status`, `switch <id> open|close`, `fault <line> [<line> ...]`,
-`locate`, `isolate`, `verify --close a,b --open c`, `plan`, `agent <line> [--auto]`, `mcp`,
-`eval --llm-only`, `serve --ui <dir>`, and with an LLM configured:
+`verify --close a,b --open c` (simulate a plan by hand), `mcp`, `eval --llm-only`,
+`serve --ui <dir>`, and:
 
 ```bash
 gridmend crew "Patrol: the sectionalizer between 6 and 7 is jammed shut"
@@ -454,35 +394,37 @@ gridmend crew                              # reports filed and switches jammed n
 
 ### LLM operator agent
 
-Set `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY` in `.env` for any OpenAI-compatible endpoint
-with tool calling (the default is local Ollama). For example, with Groq:
+Every incident is handled by the agent, so GridMend needs a model. Set `LLM_BASE_URL`,
+`LLM_MODEL` and `LLM_API_KEY` in `.env` for any OpenAI-compatible endpoint with tool calling (the
+default is local Ollama). The runs above used `openai.gpt-oss-120b` on Amazon Bedrock:
 
 ```bash
-LLM_BASE_URL=https://api.groq.com/openai/v1
-LLM_MODEL=qwen/qwen3.8-27b
-LLM_API_KEY=...
+LLM_BASE_URL=https://bedrock-runtime.ap-southeast-2.amazonaws.com/openai/v1
+LLM_MODEL=openai.gpt-oss-120b-1:0
+LLM_API_KEY=...                            # a Bedrock API key
 ```
 
 Then:
 
-* `gridmend agent 4-5` lets the agent work the incident through the tools and asks for your
-  approval before it executes a plan.
-* In the web UI, the top of the Feeder page offers **Rules / AI operator agent**. In agent
-  mode the agent reads the field reports, locates, isolates, designs a plan from the zone map,
-  tests it on a fork and revises it until it passes, compares it with the generated candidates
-  and calls `recommend_plan`, while every tool call streams into an agent log and replays on
-  the diagram. The plan list marks which plans the agent designed. It never gets the execute tool: its pick and its reason are stored on the Plan
-  node, and you approve and execute with the usual button. One model call at a time across all
-  visitors, with `AGENT_COOLDOWN_S` (default 30) between agent runs.
-* The **Field crew report** panel files a crew's note at any time. Before a fault it shapes
-  isolation; during an incident it rejects the plans that need a jammed switch and replans.
-* Without an LLM configured, the crew report and agent controls are hidden. The
-  what-if and everything else work without one.
+* `gridmend agent 4-5` faults the line and lets the agent work the incident; it asks for your
+  approval before it executes a restoration plan (`--auto` skips that). Without a line it takes
+  over the incident in progress.
+* In the web UI, faulting a line hands the incident to the agent. It reads the indicators,
+  locates and isolates on its own, then designs and tests restoration plans and calls
+  `recommend_plan`, while every tool call streams into an agent log and replays on the diagram.
+  Its pick and its reason are stored on the Plan node, and you approve and execute with the
+  usual button. One model call at a time across all visitors, with `AGENT_COOLDOWN_S` (default
+  30) between agent runs.
+* The **Field crew report** panel files a crew's note at any time. Before a fault it shapes what
+  the agent can operate; during an incident it rejects the plans that need a jammed switch and
+  the agent designs again.
+* Without an LLM configured, the map, the Graph and Results pages and the risk map work, but
+  faults cannot be worked.
 
 ### MCP
 
-`gridmend mcp` serves the same fifteen tools over stdio, so any MCP client can locate, plan,
-verify and explain on the live twin. To browse and call them interactively:
+`gridmend mcp` serves the same thirteen tools over stdio, so any MCP client can be the operator
+agent on the live twin. To browse and call them interactively:
 
 ```bash
 npx @modelcontextprotocol/inspector "$(which gridmend)" mcp
@@ -508,28 +450,25 @@ path from `which gridmend`, and start FalkorDB first):
 ```
 
 A good first session: fault a line with `gridmend fault 4-5`, then ask the client to restore
-service. It will typically call `locate_fault`, `isolation_plan` and `zone_map`, send its own
-designs to `verify_plan`, then compare them with `restoration_candidates`, and the client's own
-tool approval stands in for the operator's
-approval of `execute_plan`.
+service. It will read `zone_map`, `declare_fault`, simulate and execute an isolation, then
+design restoration plans with `simulate_plan`, and the client's own tool approval stands in for
+the operator's approval of `execute_restoration`.
 
 | Tool | Returns |
 |---|---|
 | `field_reports` | field crew reports and the switches they found jammed |
 | `grid_status` | energized and dark zones, switch states (including jammed), load served |
+| `zone_map` | every zone's state, load and critical sites, and every switch with its rating, fault indicator and the zones it joins |
 | `line_dependencies` | per line: buses, load and critical facilities downstream |
-| `locate_fault` | faulted zone and indicator evidence chain |
-| `zone_map` | every zone's state, load and critical sites, and every switch with its rating and the zones it joins |
-| `isolation_plan` | switch operations performed, zones cut out with the fault |
-| `restoration_candidates` | ranked generated plans, once the agent has verified a design of its own |
 | `transfer_capacity` | max-flow bound on what any switching could restore, and the lines that limit it |
-| `verify_plan` | pass or fail, metrics, violations, and who designed the plan (explicit switches or a candidate rank) |
-| `what_if` | best safe outcome with and without given switches jammed, on copies of the grid |
-| `recommend_plan` | records the chosen verified plan and the reason in the trace |
-| `execute_plan` | applies a verified plan |
+| `declare_fault` | records the zones the agent concluded are faulted, with its evidence |
+| `simulate_plan` | an isolation or restoration plan applied to a fork: pass or fail, metrics, violations |
+| `execute_isolation` | carries out an isolation plan that passed; reports if the breaker trips again |
+| `execute_restoration` | carries out a restoration plan that passed, after approval |
+| `recommend_plan` | records the chosen plan and the reason in the trace |
 | `fault_impact` | what a fault on a segment would cost (load left dark, critical sites lost), or every segment ranked |
 | `feeding_path` | the switches power crosses from the substation to a bus or named facility, right now |
-| `explain_plan` | feeding paths, margins, rejected alternatives, critical sites, crew reports, switching order |
+| `explain_plan` | feeding paths, margins, rejected designs, critical sites, crew reports, switching order |
 
 ### Single container
 
@@ -539,11 +478,11 @@ while the image builds, so a small host starts in seconds:
 
 * the evaluation runs, so the results page and the risk map are ready immediately;
 * the loaded feeder is saved as a FalkorDB snapshot, so the container does not rebuild the graph;
-* the candidate pre-checks and power flows the evaluation computed for all 23 faults are saved.
-  Both depend only on which switches are closed, so a deployed plan reuses them, while every plan
-  is still applied to its own fork and checked for isolation, connectivity, radiality and
-  capacity in FalkorDB. A configuration the evaluation never saw, such as one around a jammed
-  switch, runs a fresh power flow, so the first what-if after a restart takes longer.
+* the power flows the evaluation computed are saved. They depend only on which switches are
+  closed, so a simulation the evaluation already saw reuses its power flow, while every plan is
+  still applied to its own fork and checked for isolation, connectivity, radiality and capacity
+  in FalkorDB. A configuration it never saw runs a fresh power flow, which takes seconds on a
+  small host.
 
 ```bash
 docker build -t gridmend .
@@ -562,7 +501,7 @@ reloaded on every start, so there is no database to provision.
 
 To enable the LLM features on the deployed site, set `LLM_BASE_URL`, `LLM_MODEL` and
 `LLM_API_KEY` in the service's **Environment** settings (the blueprint declares them) and redeploy.
-Leave them unset and the site runs rule-based only.
+Leave them unset and faults cannot be worked; the map, Graph and Results pages still load.
 
 ## Data and assumptions
 
@@ -575,9 +514,10 @@ Leave them unset and the site runs rule-based only.
 
 ## Limitations
 
-Faults on unswitched segments only. Simultaneous faults are located and isolated (including a
-fault hidden upstream of another, found when the breaker recloses onto it), but the evaluation
-covers single faults. No protection coordination, transients, unbalanced three-phase modelling,
+Faults on unswitched segments only. The agent handles simultaneous faults, including one hidden
+upstream of another that shows when reclosing trips the breaker again, but the evaluation covers
+single faults. The agent is a language model: runs differ, and it can settle for a plan that
+restores less than the best one; the evaluation measures how often. No protection coordination, transients, unbalanced three-phase modelling,
 real SCADA or time-varying load. Distributed generation is one solar plant at unity power
 factor that trips when its bus loses power and reconnects on command (standing in for the
 reconnection delay); there is no islanding, no volt/var control and no solar variability. Crew reports only mark switches jammed or repaired: there is no crew dispatch or repair
@@ -587,10 +527,10 @@ balanced power flow.
 ## Research basis
 
 * LARA (Findings of EACL 2026): an LLM plans restoration over a pre-validated catalogue of
-  feasible actions. GridMend follows the same split: deterministic code builds and verifies,
-  the LLM chooses.
-* TwinGridShield (2026): every proposed grid action is authorised against a deterministic twin
-  before release; GridMend's fork-and-verify step follows this.
+  feasible actions. GridMend goes further: there is no catalogue, the LLM writes the switching
+  itself, and a twin checks it.
+* TwinGridShield (2026): every proposed grid action is authorised against a twin before release;
+  GridMend's simulate-then-interlock step follows this.
 * Grid-Agent (2025): LLM agents for grid violations with sandboxed validation.
 * Fault location through graph marking (IEEE Transactions on Smart Grid, 2018).
 * FLISR on GridAPPS-D (IEEE Access, 2020): open-source, algorithmic FLISR without an agent.

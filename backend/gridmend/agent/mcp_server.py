@@ -8,17 +8,18 @@ DESCRIPTIONS = {s["function"]["name"]: s["function"]["description"] for s in SCH
 
 server = MCPServer(
     "gridmend",
-    instructions="FLISR tools for a distribution feeder twin held in FalkorDB. Locate, isolate, "
-                 "generate candidates, verify each on a forked graph, then execute only a "
-                 "verified plan. The host's tool approval is the operator's approval.",
+    instructions="FLISR tools for a distribution feeder twin held in FalkorDB. Read the fault "
+                 "indicators in zone_map, declare the faulted zones, then design isolation and "
+                 "restoration switching yourself: simulate each plan on a forked graph, and "
+                 "execute only plans that passed. The host's tool approval is the operator's "
+                 "approval.",
 )
 
 _tools: GridTools | None = None
 
 
 def tools() -> GridTools:
-    # One instance per server process so restoration_candidates' ranking is remembered
-    # between calls. Execution approval comes from the MCP host confirming the tool call.
+    # Execution approval comes from the MCP host confirming the tool call.
     global _tools
     if _tools is None:
         conn = db.connect()
@@ -41,24 +42,9 @@ def line_dependencies(top: int | None = None) -> dict:
     return tools().call("line_dependencies", {"top": top})
 
 
-@server.tool(description=DESCRIPTIONS["locate_fault"])
-def locate_fault() -> dict:
-    return tools().call("locate_fault", {})
-
-
 @server.tool(description=DESCRIPTIONS["zone_map"])
 def zone_map() -> dict:
     return tools().call("zone_map", {})
-
-
-@server.tool(description=DESCRIPTIONS["isolation_plan"])
-def isolation_plan() -> dict:
-    return tools().call("isolation_plan", {})
-
-
-@server.tool(description=DESCRIPTIONS["restoration_candidates"])
-def restoration_candidates() -> dict:
-    return tools().call("restoration_candidates", {})
 
 
 @server.tool(description=DESCRIPTIONS["transfer_capacity"])
@@ -66,15 +52,20 @@ def transfer_capacity() -> dict:
     return tools().call("transfer_capacity", {})
 
 
-@server.tool(description=DESCRIPTIONS["verify_plan"])
-def verify_plan(rank: int | None = None, close: list[str] | None = None,
-                open: list[str] | None = None) -> dict:
-    return tools().call("verify_plan", {"rank": rank, "close": close, "open": open})
+@server.tool(description=DESCRIPTIONS["declare_fault"])
+def declare_fault(zones: list[int], evidence: str) -> dict:
+    return tools().call("declare_fault", {"zones": zones, "evidence": evidence})
 
 
-@server.tool(description=DESCRIPTIONS["what_if"])
-def what_if(switches: list[str], fault_line: str | None = None) -> dict:
-    return tools().call("what_if", {"switches": switches, "fault_line": fault_line})
+@server.tool(description=DESCRIPTIONS["simulate_plan"])
+def simulate_plan(purpose: str, close: list[str] | None = None,
+                  open: list[str] | None = None) -> dict:
+    return tools().call("simulate_plan", {"purpose": purpose, "close": close, "open": open})
+
+
+@server.tool(description=DESCRIPTIONS["execute_isolation"])
+def execute_isolation(plan_id: str) -> dict:
+    return tools().call("execute_isolation", {"plan_id": plan_id})
 
 
 @server.tool(description=DESCRIPTIONS["recommend_plan"])
@@ -82,9 +73,9 @@ def recommend_plan(plan_id: str, reason: str) -> dict:
     return tools().call("recommend_plan", {"plan_id": plan_id, "reason": reason})
 
 
-@server.tool(description=DESCRIPTIONS["execute_plan"])
-def execute_plan(plan_id: str) -> dict:
-    return tools().call("execute_plan", {"plan_id": plan_id})
+@server.tool(description=DESCRIPTIONS["execute_restoration"])
+def execute_restoration(plan_id: str) -> dict:
+    return tools().call("execute_restoration", {"plan_id": plan_id})
 
 
 @server.tool(description=DESCRIPTIONS["fault_impact"])

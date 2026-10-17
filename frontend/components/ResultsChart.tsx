@@ -5,7 +5,7 @@ import { methodLabel } from "@/lib/methods";
 // Series colours are theme tokens, applied through style so CSS variables resolve.
 const METHOD_COLORS: Record<string, string> = {
   optimal: "var(--optimal)",
-  gridmend: "var(--live)",
+  agent: "var(--live)",
   "llm-only": "var(--llm)",
   greedy: "var(--greedy)",
 };
@@ -21,17 +21,17 @@ function tickStep(max: number): number {
   return [1, 2, 5, 10].map((m) => m * power).find((step) => step >= rough)!;
 }
 
-// At most this many faults fit side by side; a large network shows those GridMend restores most on.
+// At most this many faults fit side by side; a large network shows those the agent restores most on.
 export const MAX_FAULTS = 16;
 
 // Grouped bars of restored kW per fault. An unsafe plan restores nothing and is marked with a red x.
 export default function ResultsChart({ rows }: { rows: ResultRow[] }) {
   const methods = Object.keys(METHOD_COLORS).filter((m) => rows.some((r) => r.method === m));
   // With an optimum, every fault that leaves load restorable; without one (a network the oracle
-  // cannot solve), the faults where GridMend restored the most.
+  // cannot solve), the faults where the agent restored the most.
   const faults = methods.includes("optimal")
     ? [...new Set(rows.filter((r) => r.optimal_kw > 0).map((r) => r.fault))]
-    : rows.filter((r) => r.method === "gridmend" && r.restored_kw > 0)
+    : rows.filter((r) => r.method === "agent" && r.restored_kw > 0)
       .sort((a, b) => b.restored_kw - a.restored_kw)
       .slice(0, MAX_FAULTS)
       .map((r) => r.fault);

@@ -67,9 +67,10 @@ export default function ExplanationPanel({ e, onPath = () => {} }: Props) {
           <h3>What happened</h3>
           <p>
             {e.faulted_zones.length > 1 ? "Faults on lines " : "A fault on line "}<b>{e.fault_line}</b>{" "}
-            {e.faulted_zones.length > 1 ? "were" : "was"} located in{" "}
+            {e.faulted_zones.length > 1 ? "were" : "was"} located by the agent in{" "}
             <b>{e.faulted_zones.map((z) => `Z${z}`).join(" and ")}</b> and isolated by {e.isolation.join(", ")}.
           </p>
+          {e.evidence && <p className="small muted">The indicators it read: {e.evidence}</p>}
           {e.cut_off.map((c) => (
             <p key={c.zone} className="callout warn">
               <span>
@@ -103,10 +104,10 @@ export default function ExplanationPanel({ e, onPath = () => {} }: Props) {
               </ul>
             </>
           ) : (
-            <p>No restoration plan passed verification, so nothing beyond isolation was executed.</p>
+            <p>No restoration design passed simulation, so nothing beyond isolation was executed.</p>
           )}
           {e.switching_order.length > 0 && <SwitchingOrder e={e} />}
-          {e.transfer.shortfall_kva > 0 && (
+          {e.transfer && e.transfer.shortfall_kva > 0 && (
             <div className="callout">
               <span className="callout-tag">algo.maxFlow</span>
               <span>
@@ -157,7 +158,7 @@ export default function ExplanationPanel({ e, onPath = () => {} }: Props) {
               <ul className="rejected-list">
                 {e.rejected.map((r) => (
                   <li key={r.id}>
-                    <b>{r.id}</b>{r.origin === "agent" && <span className="muted"> (agent&apos;s design)</span>}{" "}
+                    <b>{r.id}</b>{r.kind === "isolation" && <span className="muted"> (isolation)</span>}{" "}
                     <span className="muted">{r.ops.join(", ")}</span>
                     {r.violations.map((v) => <div key={v} className="small violation">{v}</div>)}
                   </li>

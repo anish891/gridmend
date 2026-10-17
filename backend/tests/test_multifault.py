@@ -1,12 +1,13 @@
 import pytest
 
-from gridmend.flisr.execute import restore
+from eval.isolation import isolate, locate_fault
 from gridmend.flisr.explain import explain_incident
-from gridmend.flisr.isolate import isolate, secure
-from gridmend.flisr.locate import locate_fault
+from gridmend.flisr.locate import declare_fault
 from gridmend.flisr.trace import open_incident
 from gridmend.grid.energize import grid_status
 from gridmend.sim import FaultError, apply_faults
+
+from conftest import run_plan
 
 
 def test_faults_on_separate_branches_are_located_together(graph):
@@ -40,15 +41,17 @@ def test_a_fault_hidden_upstream_trips_the_breaker_again(graph):
     assert incident["zones"] == [3, 14]
 
 
-def test_secure_isolates_every_fault_and_restoration_avoids_them(falkordb, graph):
+def test_the_agent_finds_a_hidden_fault_when_the_breaker_trips_again(falkordb, graph):
     apply_faults(graph, ["4-5", "16-17"])
-    incident_id, ops = secure(graph)
-    assert ops[0].switch_id == "13-14"
+    incident_id = declare_fault(graph, [14], "set through 13-14, nothing beyond")
+    first = run_plan(falkordb, graph, incident_id, kind="isolation", open=["13-14"], close=["1-2"])
+    assert first.passed and open_incident(graph)["status"] == "tripped"
 
-    _, executed = restore(falkordb, graph, incident_id, approve=lambda plan: True)
-    assert executed is not None
-    status = grid_status(graph)
-    assert not {3, 14} & set(status["energized_zones"])
+    declare_fault(graph, [3], "1-2 and 2-3 set after reclosing")
+    run_plan(falkordb, graph, incident_id, kind="isolation",
+             open=["2-3", "3-23", "6-7", "6-26"], close=["1-2"])
+    assert open_incident(graph)["status"] == "isolated"
+    assert not {3, 14} & set(grid_status(graph)["energized_zones"])
 
     e = explain_incident(graph, incident_id)
     assert e["faulted_zones"] == [3, 14]

@@ -48,10 +48,3 @@ voltage_max_pu: 1.05
 # cannot help pick up load in the first restoration step.
 generation:
   21: 500
-
-# Demos the UI runs in more than one step; `gridmend eval` plans them too so their power flows
-# ship with the results. Faults are run together; a staged fault is restored, its generation
-# reconnected, and the second stage planned.
-warm:
-  faults: [["20-21", "27-28"], ["4-5", "16-17"]]
-  staged: ["4-5"]

@@ -1028,9 +1028,7 @@ a.step-label:hover { text-decoration-color: currentColor; }
 
 .tools {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
-  align-items: start;
 }
 
 .crew-form {
@@ -1100,21 +1098,6 @@ a.step-label:hover { text-decoration-color: currentColor; }
 .box.jammed { border-color: var(--faulted); border-width: 3px; background: var(--text); }
 .swatch.cut-off { background: var(--faulted); opacity: 0.35; }
 
-/* What if */
-
-.whatif-form {
-  display: grid;
-  gap: var(--space-3);
-  justify-items: start;
-}
-
-.whatif-form label {
-  display: grid;
-  gap: var(--space-1);
-  width: 100%;
-  font-weight: 500;
-}
-
 select {
   font: inherit;
   color: var(--text);
@@ -1124,37 +1107,6 @@ select {
   padding: 6px var(--space-2);
   max-width: 100%;
 }
-
-.whatif-result {
-  display: grid;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
-}
-
-.whatif-result p { margin: 0; }
-
-.whatif-compare {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--space-3) var(--space-5);
-}
-
-.whatif-side h3 { margin: 0 0 var(--space-1); }
-
-.whatif-side dl {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-  font-size: var(--fs-md);
-}
-
-.whatif-side dt {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  margin-top: var(--space-1);
-}
-
-.whatif-side dd { margin: 0; }
 
 /* Switching order */
 
@@ -1884,7 +1836,6 @@ tr.quiet td:not(.bad) { color: var(--muted); }
   .status-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .status-bar .stat-wide { grid-column: 1 / -1; order: 1; border-top: 1px solid var(--border); border-left: 0; }
   .layout,
-  .tools { grid-template-columns: minmax(0, 1fr); }
   .explain-grid { grid-template-columns: minmax(0, 1fr); }
 }
 

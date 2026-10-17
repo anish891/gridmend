@@ -118,42 +118,6 @@ def cmd_fault(args: argparse.Namespace) -> int:
     return cmd_status(args)
 
 
-def cmd_locate(args: argparse.Namespace) -> int:
-    from gridmend.flisr.locate import LocateError, locate_fault
-    from gridmend.grid.feeder import live_graph
-
-    try:
-        location = locate_fault(db.connect().select_graph(live_graph()))
-    except LocateError as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    for zone in location.zones:
-        print(f"faulted zone: Z{zone}")
-        print(f"evidence:     {' -> '.join(location.chains[zone])} (all set; downstream clear)")
-    return 0
-
-
-def cmd_isolate(args: argparse.Namespace) -> int:
-    from gridmend.flisr.isolate import IsolateError, faulted_zones, secure
-    from gridmend.flisr.locate import LocateError
-    from gridmend.flisr.trace import incident_trace
-    from gridmend.grid.feeder import live_graph
-
-    g = db.connect().select_graph(live_graph())
-    try:
-        incident_id, ops = secure(g)
-    except (LocateError, IsolateError) as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    print(f"incident {incident_id}: isolated {', '.join(f'Z{z}' for z in faulted_zones(g))}")
-    for i, op in enumerate(ops, 1):
-        print(f"  {i}. {op.op} {op.switch_id}")
-    for plan in incident_trace(g, incident_id):
-        print(f"trace: {incident_id} -> {plan['plan']} ({plan['kind']}, {plan['status']}) "
-              f"-> {len(plan['ops'])} switch ops")
-    return cmd_status(args)
-
-
 def parse_ops(close: str, open_: str) -> list:
     from gridmend.flisr.trace import SwitchOp
 
@@ -189,7 +153,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     g = conn.select_graph(live_graph())
     incident = open_incident(g)
     if not incident or incident["status"] != "isolated":
-        print("no isolated incident; run fault and isolate first", file=sys.stderr)
+        print("no isolated incident; let the agent isolate a fault first", file=sys.stderr)
         return 1
     ops = parse_ops(args.close, args.open)
     if not ops:
@@ -201,123 +165,22 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if result.passed else 2
 
 
-def cmd_plan(args: argparse.Namespace) -> int:
-    from gridmend.flisr.candidates import plan_restoration
-    from gridmend.flisr.trace import open_incident
-    from gridmend.grid.feeder import live_graph
-
-    conn = db.connect()
-    g = conn.select_graph(live_graph())
-    incident = open_incident(g)
-    if not incident or incident["status"] != "isolated":
-        print("no isolated incident; run fault and isolate first", file=sys.stderr)
-        return 1
-
-    verified = plan_restoration(conn, g, incident["id"])
-    if not verified:
-        print("no restoration candidates: no dead zone can be reached from a live one")
-        return 0
-    for rank, (candidate, result) in enumerate(verified, 1):
-        print(f"#{rank} [{candidate.origin}] score {candidate.score:.0f}, "
-              f"claims {zone_list(list(candidate.claims))} ({candidate.claimed_kw:.0f} kW)")
-        print_verify(result)
-        print()
-    return 0
-
-
-def print_explanation(e: dict) -> None:
-    print(f"incident {e['incident']}: fault on {e['fault_line']} in "
-          f"{', '.join(f'Z{z}' for z in e['faulted_zones'])} "
-          f"({e['status']})")
-    print(f"isolation: {', '.join(e['isolation'])}")
-    plan = e["plan"]
-    if plan:
-        print(f"executed {plan['id']}: {', '.join(plan['ops'])}")
-        print(f"  restored {plan['restored_kw']:.0f} kW; margins: min voltage "
-              f"{plan['min_v_pu']:.3f} pu, max loading {plan['max_loading_pct']:.0f}%")
-        for zone, path in plan["paths"].items():
-            print(f"  Z{zone} fed via {' -> '.join(path)}")
-    else:
-        print("no restoration plan executed")
-    t = e["transfer"]
-    if t["shortfall_kva"]:
-        print(f"transfer limit (max flow): {t['deliverable_kva']} of {t['demand_kva']} kVA of "
-              f"healthy load can be carried at most; limited by {', '.join(t['bottlenecks'])}")
-    print("critical loads:")
-    for c in e["critical"]:
-        state = "restored" if c["energized"] else "dark"
-        line = f"  {c['facility']} (bus {c['bus']}, Z{c['zone']}): {state}"
-        print(line + (f" - {c['reason']}" if c["reason"] else ""))
-    if e["rejected"]:
-        print("rejected alternatives:")
-        for r in e["rejected"]:
-            print(f"  {r['id']} ({', '.join(r['ops'])}): {'; '.join(r['violations'])}")
-    print("switching order:")
-    for s in e["switching_order"]:
-        print(f"  {s['step']}. {s['op']} {s['switch_kind']} {s['switch_id']}  ({s['phase']}, {s['plan']})")
-
-
-def cmd_run(args: argparse.Namespace) -> int:
-    from gridmend.flisr.execute import restore
-    from gridmend.flisr.explain import explain_incident
-    from gridmend.flisr.isolate import isolate
-    from gridmend.flisr.locate import locate_fault
-    from gridmend.flisr.trace import open_incident
-    from gridmend.grid.feeder import live_graph
-    from gridmend.sim import FaultError, apply_faults
-
-    conn = db.connect()
-    g = conn.select_graph(live_graph())
-    try:
-        apply_faults(g, args.lines)
-    except FaultError as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    # Each round isolates the faults the indicators can see; reclosing onto a hidden one trips
-    # the breaker again and starts the next round.
-    while True:
-        location = locate_fault(g)
-        for zone in location.zones:
-            print(f"located Z{zone} from indicators {' -> '.join(location.chains[zone])}")
-        incident_id, ops = isolate(g)
-        print(f"isolated: {', '.join(f'{o.op} {o.switch_id}' for o in ops)}")
-        if open_incident(g)["status"] != "tripped":
-            break
-        print("the breaker tripped again: another fault was hidden upstream")
-
-    def approve(plan: dict) -> bool:
-        critical = ", ".join(plan["critical"]) or "no critical loads"
-        print(f"best verified plan {plan['id']}: {plan['restored_kw']:.0f} kW, {critical}, "
-              f"{plan['switch_ops']} switch ops")
-        if args.auto:
-            return True
-        return input("execute it? [y/N] ").strip().lower() == "y"
-
-    verified, executed = restore(conn, g, incident_id, approve)
-    passed = sum(r.passed for _, r in verified)
-    print(f"{len(verified)} candidates verified on forks, {passed} passed")
-    print()
-    print_explanation(explain_incident(g, incident_id))
-    return 0
-
-
 def summarize_step(name: str, result: dict) -> str:
     if "error" in result:
         return f"error: {result['error']}"
-    if name == "locate_fault":
-        return f"Z{result['faulted_zone']} via {' -> '.join(result['indicator_chain'])}"
-    if name == "isolation_plan":
-        return ", ".join(result["executed"])
-    if name == "restoration_candidates":
-        return f"{len(result['candidates'])} candidates"
+    if name == "declare_fault":
+        return f"{result['incident']}: faulted {', '.join(f'Z{z}' for z in result['faulted_zones'])}"
     if name == "transfer_capacity":
         return f"{result['deliverable_kva']} of {result['demand_kva']} kVA deliverable"
-    if name == "verify_plan":
+    if name == "simulate_plan":
         verdict = "PASS" if result["passed"] else "REJECTED " + "; ".join(
             v.split(":")[0] for v in result["violations"])
         return f"{result['plan_id']} {verdict}, {result['restored_kw']} kW"
-    if name == "execute_plan":
-        return "executed" if result["executed"] else result["reason"]
+    if name in ("execute_isolation", "execute_restoration"):
+        if result.get("executed") is False:
+            return result["reason"]
+        tripped = ", BREAKER TRIPPED AGAIN" if "breaker_tripped_again" in result else ""
+        return ", ".join(result["executed"]) + tripped
     return "ok"
 
 
@@ -330,12 +193,14 @@ def cmd_agent(args: argparse.Namespace) -> int:
 
     conn = db.connect()
     g = conn.select_graph(live_graph())
-    try:
-        apply_fault(g, args.line)
-    except FaultError as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    print(f"fault on {args.line}; breaker tripped")
+    # Without a line the agent takes over the incident already in progress.
+    if args.line:
+        try:
+            apply_fault(g, args.line)
+        except FaultError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print(f"fault on {args.line}; breaker tripped")
 
     def approve(plan: dict) -> bool:
         critical = ", ".join(plan["critical"]) or "no critical loads"
@@ -380,24 +245,26 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def cmd_eval(args: argparse.Namespace) -> int:
     from eval.run import (
-        markdown, record_llm_only, run_all, run_llm_only, summarize, warm_demo_caches,
-        with_recorded_llm_only, write_outputs,
+        markdown, record_rows, run_agent_row, run_all, run_llm_only, summarize,
+        with_recorded_rows, write_outputs,
     )
+    from gridmend.grid import feeder
 
-    extra = []
-    if args.llm_only:
+    fresh = {}
+    if args.llm_only or args.agent:
         from gridmend.agent.llm import make_client
 
         client, model = make_client()
-        extra.append(lambda conn, line: run_llm_only(conn, line, client, model))
-    rows = run_all(db.connect(), extra)
-    warm_demo_caches(db.connect())
-    from gridmend.grid import feeder
-
-    if args.llm_only:
-        record_llm_only(rows)
-    elif feeder.name() == "ieee33":
-        rows = with_recorded_llm_only(rows)
+        if args.llm_only:
+            fresh["llm-only"] = lambda conn, line: run_llm_only(conn, line, client, model)
+        if args.agent:
+            fresh["agent"] = lambda conn, line: run_agent_row(conn, line, client, model)
+    rows = run_all(db.connect(), list(fresh.values()))
+    # Model-driven rows are not deterministic: a run with a model records them, and every
+    # other run, including the image build, replays the recording.
+    record_rows(rows, list(fresh))
+    if feeder.name() == "ieee33":
+        rows = with_recorded_rows(rows, [m for m in ("llm-only", "agent") if m not in fresh])
     summary = summarize(rows)
     out = write_outputs(rows, summary)
     print(markdown(rows, summary))
@@ -437,34 +304,6 @@ def cmd_crew(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_whatif(args: argparse.Namespace) -> int:
-    from gridmend.flisr.isolate import IsolateError
-    from gridmend.flisr.locate import LocateError
-    from gridmend.flisr.whatif import WhatIfError, what_if
-    from gridmend.grid.feeder import live_graph
-    from gridmend.sim import FaultError
-
-    conn = db.connect()
-    try:
-        r = what_if(conn, conn.select_graph(live_graph()), args.switches, args.fault)
-    except (WhatIfError, FaultError, LocateError, IsolateError) as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    for label, o in (("as things are", r["as_is"]), (f"if {', '.join(r['switches'])} cannot operate", r["jammed"])):
-        print(f"{label}:")
-        print(f"  isolation: {', '.join(o['isolation'])}")
-        for c in o["cut_off"]:
-            print(f"  Z{c['zone']} cut out with the fault ({c['via']} jammed)")
-        plan = o["plan"]
-        print(f"  best safe plan: {', '.join(plan['ops'])}, {plan['restored_kw']} kW" if plan
-              else "  no safe restoration plan")
-        print(f"  critical sites restored: {', '.join(o['critical_restored']) or 'none'}")
-    print(f"difference: {r['kw_change']:+} kW"
-          + (f"; loses {', '.join(r['critical_lost'])}" if r["critical_lost"] else "")
-          + (f"; gains {', '.join(r['critical_gained'])}" if r["critical_gained"] else ""))
-    return 0
-
-
 def cmd_dg(args: argparse.Namespace) -> int:
     from gridmend.flisr.generation import generation_status, reconnect_generation
     from gridmend.grid.feeder import live_graph
@@ -475,7 +314,7 @@ def cmd_dg(args: argparse.Namespace) -> int:
         back = ", ".join(f"bus {b}" for b in result["reconnected"]) or "nothing"
         print(f"reconnected: {back}")
         if result["replan"]:
-            print("healthy zones are still dark: planning is open again (gridmend plan)")
+            print("healthy zones are still dark: planning is open again (gridmend agent)")
     for unit in generation_status(g):
         state = "online" if unit["online"] else "offline"
         power = "has power" if unit["energized"] else "no power"
@@ -521,45 +360,26 @@ def build_parser() -> argparse.ArgumentParser:
                     help="bring back units whose bus has power again (after the reconnection delay)")
     dg.set_defaults(func=cmd_dg)
 
-    whatif = sub.add_parser("whatif", help="compare planning with and without switches that "
-                                           "cannot operate, on copies of the grid")
-    whatif.add_argument("switches", nargs="+", help="switch ids that cannot be operated")
-    whatif.add_argument("--fault", help="segment to fault first, when the feeder is healthy")
-    whatif.set_defaults(func=cmd_whatif)
-
     crew = sub.add_parser("crew", help="file a field crew's note; the LLM reads which switches "
                                        "are jammed or repaired")
     crew.add_argument("note", nargs="?", help="the crew's note as written; omit to list reports")
     crew.set_defaults(func=cmd_crew)
 
-    sub.add_parser("locate", help="locate the faulted zone from indicators").set_defaults(
-        func=cmd_locate
-    )
-    sub.add_parser("isolate", help="isolate the faulted zone and record the incident").set_defaults(
-        func=cmd_isolate
-    )
-
-    verify = sub.add_parser("verify", help="verify a switching plan on a forked graph")
+    verify = sub.add_parser("verify", help="simulate a restoration plan on a forked graph by hand")
     verify.add_argument("--close", default="", help="comma-separated switch ids to close")
     verify.add_argument("--open", default="", help="comma-separated switch ids to open")
     verify.set_defaults(func=cmd_verify)
 
-    sub.add_parser("plan", help="generate, rank and verify restoration candidates").set_defaults(
-        func=cmd_plan
-    )
-
-    run = sub.add_parser("run", help="fault one or more lines and run the full FLISR loop")
-    run.add_argument("lines", nargs="+", metavar="line")
-    run.add_argument("--auto", action="store_true", help="execute the best plan without asking")
-    run.set_defaults(func=cmd_run)
-
     evaluate = sub.add_parser("eval", help="run all single faults against the baselines")
     evaluate.add_argument("--llm-only", action="store_true",
-                          help="also run the tool-less LLM baseline")
+                          help="run the tool-less LLM baseline instead of replaying it")
+    evaluate.add_argument("--agent", action="store_true",
+                          help="run the LLM agent on every fault instead of replaying it")
     evaluate.set_defaults(func=cmd_eval)
 
-    agent = sub.add_parser("agent", help="fault a line and let the LLM operator restore it")
-    agent.add_argument("line")
+    agent = sub.add_parser("agent", help="fault a line; the LLM agent locates, isolates and "
+                                         "restores it")
+    agent.add_argument("line", nargs="?", help="segment to fault; omit to continue an incident")
     agent.add_argument("--auto", action="store_true", help="approve the agent's plan without asking")
     agent.set_defaults(func=cmd_agent)
 

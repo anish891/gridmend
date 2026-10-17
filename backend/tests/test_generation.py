@@ -1,11 +1,12 @@
-from gridmend.flisr.execute import restore
+from eval.isolation import secure
 from gridmend.flisr.explain import explain_incident
 from gridmend.flisr.generation import generation_status, reconnect_generation
-from gridmend.flisr.isolate import secure
 from gridmend.flisr.trace import SwitchOp, open_incident
 from gridmend.flisr.verify import check_capacity, verify_plan
 from gridmend.grid.energize import grid_status
 from gridmend.sim import apply_fault
+
+from conftest import isolated, run_plan
 
 
 def online(g):
@@ -42,15 +43,15 @@ def test_online_solar_relieves_the_lateral_that_limits_restoration(falkordb, gra
 
 
 def test_staged_restoration_picks_up_more_once_solar_is_back(falkordb, graph):
-    apply_fault(graph, "4-5")
-    incident_id, _ = secure(graph)
-    _, first = restore(falkordb, graph, incident_id, approve=lambda plan: True)
-    assert first["restored_kw"] == 850
+    incident_id = isolated(graph, "4-5")
+    first = run_plan(falkordb, graph, incident_id, close=["8-21", "9-15"], open=["9-10", "13-14"])
+    assert first.restored_kw == 850
 
+    # With the solar plant back, the agent is asked to plan again and Z10 now fits on 2-19.
     assert reconnect_generation(graph) == {"reconnected": [21], "replan": True}
     assert open_incident(graph)["status"] == "isolated"
-    _, second = restore(falkordb, graph, incident_id, approve=lambda plan: True)
-    assert second["restored_kw"] == 225
+    second = run_plan(falkordb, graph, incident_id, close=["12-22"])
+    assert second.passed and second.restored_kw == 225
     assert 10 in grid_status(graph)["energized_zones"]
 
     plan = explain_incident(graph, incident_id)["plan"]

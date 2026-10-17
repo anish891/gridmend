@@ -11,12 +11,20 @@ export function describe(e: ToolEvent): { label: string; detail: string; bad?: b
   switch (e.name) {
     case "grid_status":
       return { label: "Checked grid status", detail: `${r.load_served_kw} of ${r.total_load_kw} kW served` };
-    case "locate_fault":
-      return { label: "Located the fault", detail: `Z${r.faulted_zone} via ${r.indicator_chain.join(" → ")}` };
-    case "isolation_plan":
-      return r.already_isolated
-        ? { label: "Checked isolation", detail: "already isolated, the breaker held" }
-        : { label: "Isolated it", detail: r.executed.join(", ") };
+    case "declare_fault":
+      return {
+        label: `Located the fault in ${r.faulted_zones.map((z: number) => `Z${z}`).join(" and ")}`,
+        detail: String(e.args.evidence ?? ""),
+      };
+    case "execute_isolation":
+    case "execute_restoration":
+      if (r.executed === false) return { label: "Asked for approval", detail: String(r.reason) };
+      return {
+        label: r.breaker_tripped_again ? "Switched, and the breaker tripped again"
+          : e.name === "execute_isolation" ? "Isolated the fault" : "Restored power",
+        detail: r.executed.join(", "),
+        bad: Boolean(r.breaker_tripped_again),
+      };
     case "line_dependencies":
       return { label: "Checked what depends on each line", detail: `${r.lines.length} lines` };
     case "transfer_capacity":
@@ -27,16 +35,13 @@ export function describe(e: ToolEvent): { label: string; detail: string; bad?: b
     case "zone_map":
       return {
         label: "Read the zone map",
-        detail: `${r.zones.filter((z: { state: string }) => z.state === "dark").length} healthy zones dark`,
+        detail: `${r.zones.filter((z: { state: string }) => z.state === "dark").length} healthy zones dark, `
+          + `${r.switches.filter((w: { indicator?: string }) => w.indicator === "set").length} indicators set`,
       };
-    case "restoration_candidates":
-      return { label: "Asked for generated plans to compare", detail: `${r.candidates.length} ranked plans` };
-    case "verify_plan": {
+    case "simulate_plan": {
       const verdict = r.passed ? "passed" : `rejected (${r.violations.map((v: string) => v.split(":")[0]).join(", ")})`;
-      const label = r.designed_by === "agent"
-        ? `Tested its own design ${r.plan_id} on a fork`
-        : `Verified generated ${r.plan_id} on a fork`;
-      return { label, detail: `${verdict}, ${r.restored_kw} kW`, bad: !r.passed };
+      const what = r.purpose === "isolation" ? "isolation plan" : "restoration design";
+      return { label: `Tested its ${what} ${r.plan_id} on a fork`, detail: `${verdict}, ${r.restored_kw} kW`, bad: !r.passed };
     }
     case "recommend_plan":
       return { label: `Recommended ${r.recommended}`, detail: String(e.args.reason ?? "") };
@@ -53,11 +58,6 @@ export function describe(e: ToolEvent): { label: string; detail: string; bad?: b
       return r.segments
         ? { label: "Ranked every line by what a fault would cost", detail: `worst: ${r.segments[0].line}, ${r.segments[0].still_dark_kw} kW dark` }
         : { label: `Looked up a fault on ${r.line}`, detail: `${r.still_dark_kw} kW stays dark` };
-    case "what_if":
-      return {
-        label: `Planned as if ${r.switches.join(", ")} could not move`,
-        detail: `${r.jammed.restored_kw} kW restorable, ${r.kw_change >= 0 ? "+" : ""}${r.kw_change} kW vs. as is`,
-      };
     default:
       return { label: e.name, detail: "" };
   }
@@ -114,7 +114,7 @@ export default function AgentPanel({ model, events, running }: Props) {
     <Card
       className="agent-panel"
       title="Operator agent"
-      hint={`${model} · calls the same tools, never executes; you approve`}
+      hint={`${model} · isolates on its own; you approve the restoration`}
     >
       <ol className="agent-log">
         {tools.map((e, i) => {

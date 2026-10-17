@@ -12,9 +12,9 @@ export const METHODS: Record<string, { label: string; hint: string }> = {
     label: "AI alone",
     hint: "A language model given a text description of the feeder and no tools. Its switching is checked afterwards.",
   },
-  gridmend: {
-    label: "GridMend",
-    hint: "Plans from the graph, checks every plan on a copy of the grid, then acts.",
+  agent: {
+    label: "GridMend agent",
+    hint: "The LLM agent locates, isolates and designs restoration itself from the graph, tests every plan on a copy of the grid, and only then acts.",
   },
   optimal: {
     label: "Best possible",

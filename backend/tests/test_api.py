@@ -6,8 +6,14 @@ from fastapi.testclient import TestClient
 from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageToolCall
 from openai.types.chat.chat_completion_message_tool_call import Function
 
+from eval.isolation import secure
 from gridmend import api
-from conftest import TEST_GRAPH
+from gridmend.flisr.trace import SwitchOp
+from gridmend.flisr.verify import verify_plan
+from conftest import TEST_GRAPH, isolated
+
+BOTH_SITES = [SwitchOp("9-10", "open"), SwitchOp("13-14", "open"),
+              SwitchOp("8-21", "close"), SwitchOp("9-15", "close")]
 
 
 @pytest.fixture
@@ -26,39 +32,25 @@ def test_state_has_buses_switches_and_zones(client):
     assert state["incident"] is None
 
 
-def test_fault_to_restore_flow(client):
+def test_the_operator_executes_a_plan_the_agent_simulated(client, falkordb, graph):
     assert client.post("/fault", json={"line": "4-5"}).json()["indicators_set"] == ["1-2", "2-3"]
-    assert client.post("/locate").json() == {"zone": 3, "chain": ["1-2", "2-3"], "zones": [3],
-                                             "chains": {"3": ["1-2", "2-3"]}}
-    assert len(client.post("/isolate").json()["ops"]) == 5
+    incident_id, _ = secure(graph)
+    loop = verify_plan(falkordb, graph, incident_id, "inc1-p1",
+                       [SwitchOp("8-21", "close"), SwitchOp("12-22", "close")], origin="agent")
+    good = verify_plan(falkordb, graph, incident_id, "inc1-p2", BOTH_SITES, origin="agent")
 
-    plan = client.post("/plan").json()
-    assert len(plan["candidates"]) == 5
-    recommended = next(c for c in plan["candidates"] if c["plan_id"] == plan["recommended"])
-    assert recommended["critical"] == ["hospital", "fire station"]
-    rejected = [c for c in plan["candidates"] if not c["passed"]]
-    assert all(c["violations"] for c in rejected)
-
-    assert client.post("/execute", json={"plan_id": plan["recommended"]}).status_code == 200
-    explanation = client.get("/explain").json()
-    assert explanation["status"] == "restored"
+    assert client.post("/execute", json={"plan_id": loop.plan_id}).status_code == 400
+    response = client.post("/execute", json={"plan_id": good.plan_id}).json()
+    assert response["tripped_again"] is False
+    assert client.get("/explain").json()["status"] == "restored"
     assert client.get("/state").json()["served_kw"] == pytest.approx(1310)
-
-
-def test_rejected_plan_cannot_be_executed(client):
-    client.post("/fault", json={"line": "4-5"})
-    client.post("/locate")
-    client.post("/isolate")
-    plan = client.post("/plan").json()
-    rejected = next(c for c in plan["candidates"] if not c["passed"])
-    response = client.post("/execute", json={"plan_id": rejected["plan_id"]})
-    assert response.status_code == 400
 
 
 def test_bad_requests_are_400_or_409(client):
     assert client.post("/fault", json={"line": "2-19"}).status_code == 400
-    assert client.post("/plan").status_code == 409
     assert client.get("/explain").status_code == 409
+    for removed in ("/locate", "/isolate", "/plan", "/whatif"):
+        assert client.post(removed).status_code in (404, 405)
 
 
 def test_results_match_the_evaluation_output(client, tmp_path, monkeypatch):
@@ -67,7 +59,7 @@ def test_results_match_the_evaluation_output(client, tmp_path, monkeypatch):
     monkeypatch.setattr(run, "out_dir", lambda: tmp_path)
     assert client.get("/results").status_code == 404
 
-    rows = [run.Row("4-5", "gridmend", 850.0, 2, 4, 0, 500.0, 850.0),
+    rows = [run.Row("4-5", "agent", 850.0, 2, 4, 0, 40000.0, 850.0),
             run.Row("4-5", "optimal", 850.0, 2, 4, 0, 300.0, 850.0)]
     run.write_outputs(rows, run.summarize(rows))
     body = client.get("/results").json()
@@ -75,46 +67,49 @@ def test_results_match_the_evaluation_output(client, tmp_path, monkeypatch):
     assert body["summary"] == run.summarize(rows)
 
 
-def test_queries_run_live_and_follow_the_incident(client):
+def test_queries_run_live_and_follow_the_incident(client, graph):
     healthy = {q["key"]: q for q in client.get("/queries").json()["steps"]}
     assert healthy["zones"]["total_rows"] == 9
     assert healthy["energize"]["total_rows"] == 33
-    assert "skipped" in healthy["isolate"] and "skipped" in healthy["trace"]
+    assert healthy["indicators"]["total_rows"] == 14
+    assert "skipped" in healthy["trace"]
 
-    client.post("/fault", json={"line": "4-5"})
-    client.post("/locate")
-    client.post("/isolate")
-    isolated = {q["key"]: q for q in client.get("/queries").json()["steps"]}
-    assert isolated["isolate"]["params"] == {"zones": [3]}
-    assert isolated["options"]["rows"] == [[7, "8-21"], [10, "12-22"]]
-    assert isolated["trace"]["rows"][0][:3] == ["inc1-iso", "isolation", "executed"]
+    isolated(graph, "4-5")
+    after = {q["key"]: q for q in client.get("/queries").json()["steps"]}
+    switches = {row[0]: row for row in after["indicators"]["rows"]}
+    assert switches["2-3"][5] == "set"
+    assert after["trace"]["rows"][0][:3] == ["inc1-iso", "isolation", "executed"]
+
+
+Z3_SCRIPT = [
+    ("zone_map", {}),
+    ("declare_fault", {"zones": [3], "evidence": "1-2 and 2-3 set"}),
+    ("simulate_plan", {"purpose": "isolation", "open": ["2-3", "3-23", "6-7", "6-26"],
+                       "close": ["1-2"]}),
+    ("execute_isolation", lambda r: {"plan_id": r[2]["plan_id"]}),
+    ("simulate_plan", {"purpose": "restoration", "close": ["8-21"]}),
+    ("simulate_plan", {"purpose": "restoration", "close": ["8-21", "9-15"],
+                       "open": ["9-10", "13-14"]}),
+    ("recommend_plan", lambda r: {"plan_id": r[5]["plan_id"],
+                                  "reason": "restores the hospital and fire station"}),
+]
 
 
 class ScriptedAdvisor:
-    """Stands in for the LLM: follows the advisor prompt using real tool results."""
+    """Stands in for the LLM: plays a script of tool calls, filling plan ids from real results."""
 
-    def __init__(self):
+    def __init__(self, script=Z3_SCRIPT):
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
         self.offered = []
+        self.script = script
 
     def create(self, model, messages, tools, temperature):
         self.offered = [t["function"]["name"] for t in tools]
         results = [json.loads(m["content"]) for m in messages if m["role"] == "tool"]
-        script = [("locate_fault", {}), ("isolation_plan", {}),
-                  ("verify_plan", {"close": ["8-21"], "open": ["9-10"]}),
-                  ("restoration_candidates", {})]
-        if len(results) < len(script):
-            return self.call(*script[len(results)])
-        candidates = results[3]["candidates"]
-        verified = results[4:4 + len(candidates)]
-        if len(verified) < len(candidates):
-            return self.call("verify_plan", {"rank": len(verified) + 1})
-        if len(results) == 4 + len(candidates):
-            best = max((v for v in verified if v["passed"]),
-                       key=lambda v: (len(v["critical_loads_restored"]), v["restored_kw"]))
-            return self.call("recommend_plan", {"plan_id": best["plan_id"],
-                                                "reason": "restores the hospital and fire station"})
-        return self.wrap(ChatCompletionMessage(role="assistant", content="Recommend it."))
+        if len(results) >= len(self.script):
+            return self.wrap(ChatCompletionMessage(role="assistant", content="Recommend it."))
+        name, args = self.script[len(results)]
+        return self.call(name, args(results) if callable(args) else args)
 
     def call(self, name, args):
         tool_call = ChatCompletionMessageToolCall(
@@ -159,9 +154,9 @@ def test_agent_advises_and_the_operator_executes(client, agent):
     client.post("/fault", json={"line": "4-5"})
     events = stream_events(client)
 
-    assert "execute_plan" not in agent.offered
+    assert "execute_restoration" not in agent.offered and "execute_isolation" in agent.offered
     assert [e["name"] for e in events if e["type"] == "tool"][:4] == [
-        "locate_fault", "isolation_plan", "verify_plan", "restoration_candidates"]
+        "zone_map", "declare_fault", "simulate_plan", "execute_isolation"]
     assert events[-1] == {"type": "final", "text": "Recommend it.", "model": "scripted"}
     assert client.get("/state").json()["served_kw"] == pytest.approx(460)
 
@@ -171,23 +166,30 @@ def test_agent_advises_and_the_operator_executes(client, agent):
     assert recommended["recommendation"] == "restores the hospital and fire station"
     assert all(set(p) >= {"ops", "violations", "restored_zones", "dropped_zones", "critical"}
                for p in plans["candidates"])
-    origins = [p["origin"] for p in plans["candidates"]]
-    assert origins[0] == "agent" and set(origins[1:]) <= {"greedy", "tie-only", "repaired"}
+    assert [p["passed"] for p in plans["candidates"]] == [False, True]
+    assert {p["origin"] for p in plans["candidates"]} == {"agent"}
     assert client.post("/execute", json={"plan_id": plans["recommended"]}).status_code == 200
     assert client.get("/state").json()["served_kw"] == pytest.approx(1310)
 
 
 def test_agent_cannot_recommend_a_rejected_plan(falkordb, graph):
     from gridmend.agent.tools import GridTools
-    from gridmend.sim import apply_fault
 
-    apply_fault(graph, "4-5")
+    incident_id = isolated(graph, "4-5")
     tools = GridTools(falkordb, graph, approve=lambda plan: False, can_execute=False)
-    tools.locate_fault()
-    tools.isolation_plan()
-    rejected = tools.verify_plan(close=["8-21", "12-22"])
+    rejected = tools.call("simulate_plan", {"purpose": "restoration", "close": ["8-21", "12-22"]})
     assert "error" in tools.call("recommend_plan", {"plan_id": rejected["plan_id"], "reason": "x"})
-    assert "error" in tools.call("execute_plan", {"plan_id": rejected["plan_id"]})
+    assert incident_id == rejected["plan_id"].split("-")[0]
+
+
+def test_the_agent_can_take_over_an_isolated_incident_but_not_a_restored_one(client, falkordb,
+                                                                            graph, agent):
+    incident_id = isolated(graph, "4-5")
+    with client.stream("POST", "/agent/run") as response:
+        assert response.status_code == 200
+    good = verify_plan(falkordb, graph, incident_id, "inc1-p9", BOTH_SITES, origin="agent")
+    client.post("/execute", json={"plan_id": good.plan_id})
+    assert client.post("/agent/run").status_code == 409
 
 
 def test_agent_runs_are_spaced_out(client, agent, monkeypatch):
@@ -224,7 +226,7 @@ def test_risk_map_comes_from_the_evaluation(client, tmp_path, monkeypatch):
 
     monkeypatch.setattr(run, "out_dir", lambda: tmp_path)
     assert client.get("/risk").status_code == 404
-    rows = [run.Row("4-5", "gridmend", 850.0, 2, 4, 0, 500.0, 850.0, 2405.0, "water pumping;telecom"),
+    rows = [run.Row("4-5", "agent", 850.0, 2, 4, 0, 500.0, 850.0, 2405.0, "water pumping;telecom"),
             run.Row("4-5", "optimal", 850.0, 2, 4, 0, 300.0, 850.0)]
     run.write_outputs(rows, run.summarize(rows))
     assert client.get("/risk").json()["lines"] == [
@@ -232,24 +234,17 @@ def test_risk_map_comes_from_the_evaluation(client, tmp_path, monkeypatch):
          "critical_dark": ["water pumping", "telecom"]}]
 
 
-def test_planning_again_after_a_jam_recommends_from_the_new_round(client, graph, fixed_model, monkeypatch):
-    client.post("/fault", json={"line": "4-5"})
-    client.post("/locate")
-    client.post("/isolate")
-    first = client.post("/plan").json()
-    assert "8-21" in {o["switch_id"] for c in first["candidates"] if c["plan_id"] == first["recommended"]
-                      for o in c["ops"]}
-
+def test_a_jam_reported_mid_incident_rejects_the_plans_that_need_it(client, falkordb, graph,
+                                                                   fixed_model, monkeypatch):
+    incident_id = isolated(graph, "4-5")
+    plan = verify_plan(falkordb, graph, incident_id, "inc1-p1", BOTH_SITES, origin="agent")
     reply = json.dumps({"findings": [{"switch": "8-21", "operable": False, "evidence": "seized"}]})
     monkeypatch.setenv("LLM_API_KEY", "test")
     monkeypatch.setattr(api, "agent_client", lambda: (fixed_model(reply), "m"))
-    filed = client.post("/crew", json={"note": "The 8-21 tie is seized."}).json()
-    assert filed["rejected_plans"] == [first["recommended"]]
 
-    again = client.post("/plan").json()
-    ids = {c["plan_id"] for c in again["candidates"]}
-    assert again["recommended"] in ids
-    assert all(o["switch_id"] != "8-21" for c in again["candidates"] for o in c["ops"])
+    filed = client.post("/crew", json={"note": "The 8-21 tie is seized."}).json()
+    assert filed["rejected_plans"] == [plan.plan_id]
+    assert client.post("/execute", json={"plan_id": plan.plan_id}).status_code == 400
     state = client.get("/state").json()
     assert next(l for l in state["lines"] if l["id"] == "8-21")["operable"] is False
 
@@ -288,7 +283,7 @@ def test_questions_are_answered_from_the_graph_with_read_only_tools(client, aske
 
     assert asker.question == "How is the hospital fed?"
     assert set(asker.offered) == {"field_reports", "grid_status", "zone_map", "line_dependencies",
-                                  "transfer_capacity", "what_if", "fault_impact", "feeding_path",
+                                  "transfer_capacity", "fault_impact", "feeding_path",
                                   "explain_plan"}
     tool = events[0]
     assert tool["name"] == "feeding_path"
@@ -333,14 +328,26 @@ def test_each_request_is_served_from_the_feeder_it_names(both_feeders):
         assert client.get(f"{path}?feeder=oberrhein").status_code in (200, 404, 409), path
 
 
-def test_the_whole_loop_runs_on_oberrhein_through_the_api(both_feeders):
+
+def test_the_agent_works_an_oberrhein_fault_through_the_api(both_feeders, monkeypatch):
     client = both_feeders
-    # Endpoints run in worker threads; the feeder must follow the request into them.
+    advisor = ScriptedAdvisor([
+        ("declare_fault", {"zones": [27], "evidence": "set into Z27, clear beyond"}),
+        ("simulate_plan", {"purpose": "isolation", "open": ["22-27", "71-76"], "close": ["2-6"]}),
+        ("execute_isolation", lambda r: {"plan_id": r[1]["plan_id"]}),
+    ])
+    monkeypatch.setenv("LLM_API_KEY", "test")
+    monkeypatch.setattr(api, "agent_client", lambda: (advisor, "scripted"))
+    monkeypatch.setattr(api, "AGENT_COOLDOWN_S", 0)
+
+    # Endpoints and the agent run in worker threads; the feeder must follow the request into them.
     assert client.post("/fault?feeder=oberrhein", json={"line": "27-33"}).status_code == 200
-    assert client.post("/locate?feeder=oberrhein").json()["zones"] == [27]
-    isolation = client.post("/isolate?feeder=oberrhein").json()
-    assert [o["switch_id"] for o in isolation["ops"]] == ["22-27", "71-76", "2-6"]
-    plans = client.post("/plan?feeder=oberrhein").json()
-    assert any(c["passed"] for c in plans["candidates"])
+    with client.stream("POST", "/agent/run?feeder=oberrhein") as response:
+        events = [json.loads(line[len("data: "):]) for line in response.iter_lines()
+                  if line.startswith("data: ")]
+    isolation = next(e for e in events if e.get("name") == "execute_isolation")["result"]
+    assert isolation["executed"] == ["open 22-27", "open 71-76", "close 2-6"]
+    assert "breaker_tripped_again" not in isolation
+    assert client.get("/state?feeder=oberrhein").json()["incident"]["status"] == "isolated"
     # The 33-bus twin is untouched.
     assert client.get("/state").json()["incident"] is None

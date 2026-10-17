@@ -43,7 +43,7 @@ export const FEEDERS: Record<FeederId, FeederConfig> = {
     questions: [
       "Which line is most critical right now, and what would a fault there cost?",
       "How is the hospital fed?",
-      "If line 4-5 faults and tie 8-21 is jammed, what changes?",
+      "What limits restoring more load right now?",
     ],
     crewExamples: [
       {
@@ -76,7 +76,7 @@ export const FEEDERS: Record<FeederId, FeederConfig> = {
     questions: [
       "Which line is most critical right now, and what would a fault there cost?",
       "How is the hospital fed?",
-      "If line 13-19 faults and tie 157-164 is jammed, what changes?",
+      "What limits restoring more load right now?",
     ],
     crewExamples: [
       {

@@ -1,5 +1,4 @@
-from gridmend.flisr.isolate import isolate
-from gridmend.flisr.locate import locate_fault
+from eval.isolation import isolate, locate_fault
 from gridmend.flisr.transfer import transfer_limit
 from gridmend.sim import apply_fault
 

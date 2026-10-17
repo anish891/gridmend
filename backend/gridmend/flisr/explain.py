@@ -1,6 +1,5 @@
 from falkordb import Graph
 
-from gridmend.flisr.candidates import screen
 from gridmend.flisr.crew import crew_reports
 from gridmend.flisr.isolate import isolation_plans
 from gridmend.flisr.transfer import transfer_limit
@@ -54,14 +53,13 @@ def rejected_plans(g: Graph, incident_id: str) -> list[dict]:
     rows = g.ro_query(
         """
         MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {status: 'rejected'})-[:VIOLATES]->(v)
-        RETURN p.id, p.origin, collect(v.type + ': ' + v.detail)
+        RETURN p.id, p.kind, collect(v.type + ': ' + v.detail)
         ORDER BY p.id
         """,
         {"id": incident_id},
     ).result_set
-    return [{"id": plan_id, "origin": origin, "ops": plan_steps(g, plan_id),
-             "violations": violations}
-            for plan_id, origin, violations in rows]
+    return [{"id": plan_id, "kind": kind, "ops": plan_steps(g, plan_id), "violations": violations}
+            for plan_id, kind, violations in rows]
 
 
 def why_dark(g: Graph, incident_id: str, zone: int, faulted: bool) -> str:
@@ -76,11 +74,11 @@ def why_dark(g: Graph, incident_id: str, zone: int, faulted: bool) -> str:
         return (f"cut out with the fault: switch {cut[0][0]} is jammed closed, so this zone could "
                 f"not be separated from the faulted one")
 
-    # A safe plan existed but another one ranked higher.
+    # A safe plan existed but the agent chose another.
     passed_over = g.ro_query(
         """
-        MATCH (i:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {status: 'verified'})-[:RESTORES]->
-              (:Zone {id: $zone})
+        MATCH (i:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {kind: 'restoration', status: 'verified'})
+              -[:RESTORES]->(:Zone {id: $zone})
         OPTIONAL MATCH (i)-[:HAS_PLAN]->(chosen:Plan {kind: 'restoration', status: 'executed'})
         RETURN p.id, chosen.id ORDER BY p.id LIMIT 1
         """,
@@ -89,14 +87,13 @@ def why_dark(g: Graph, incident_id: str, zone: int, faulted: bool) -> str:
     if passed_over:
         plan_id, chosen = passed_over[0]
         if chosen:
-            return (f"{plan_id} would restore it safely, but {chosen} ranks higher on "
-                    f"critical sites and load restored")
+            return f"{plan_id} would restore it safely, but the agent chose {chosen}"
         return f"{plan_id} would restore it safely; awaiting the operator's choice"
 
     blocked = g.ro_query(
         """
-        MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {status: 'rejected'})-[:RESTORES]->
-              (:Zone {id: $zone})
+        MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {kind: 'restoration', status: 'rejected'})
+              -[:RESTORES]->(:Zone {id: $zone})
         MATCH (p)-[:VIOLATES]->(v)
         RETURN p.id, v.type, v.detail ORDER BY p.id LIMIT 1
         """,
@@ -106,37 +103,23 @@ def why_dark(g: Graph, incident_id: str, zone: int, faulted: bool) -> str:
         plan_id, kind, detail = blocked[0]
         return f"the plan that would restore it ({plan_id}) was rejected: {kind}, {detail}"
 
-    # Otherwise try each tie to a now-live neighbour against the current configuration.
     ties = g.ro_query(
         """
-        MATCH (:Zone {id: $zone})-[b:BOUNDARY {kind: 'tie'}]-(o:Zone {energized: true})
-        RETURN b.switch_id, o.id ORDER BY b.switch_id
+        MATCH (:Zone {id: $zone})-[b:BOUNDARY {kind: 'tie'}]-(:Zone {energized: true})
+        RETURN count(b)
         """,
         {"zone": zone},
-    ).result_set
+    ).result_set[0][0]
     if not ties:
         return "no tie connects it to a live zone"
-    closed = frozenset(row[0] for row in g.ro_query(
-        "MATCH ()-[s:SW {status: 'closed'}]->() RETURN s.id"
-    ).result_set)
-    reasons = []
-    for tie, neighbour in ties:
-        result = screen(g, closed | {tie})
-        if not result.radial:
-            reasons.append(f"closing {tie} from Z{neighbour} would close a loop")
-        elif not result.within_capacity:
-            reasons.append(f"closing {tie} from Z{neighbour} would overload its feeding path")
-        else:
-            reasons.append(f"closing {tie} from Z{neighbour} passes screening but was not "
-                           f"among the verified plans")
-    return "; ".join(reasons)
+    return "no plan that restores it was simulated"
 
 
 def explain_incident(g: Graph, incident_id: str) -> dict:
     rows = g.ro_query(
         """
         MATCH (i:Incident {id: $id})-[:FAULT_IN]->(z:Zone)
-        RETURN i.fault_line, i.status, z.id ORDER BY z.id
+        RETURN i.fault_line, i.status, z.id, i.evidence ORDER BY z.id
         """,
         {"id": incident_id},
     ).result_set
@@ -189,6 +172,8 @@ def explain_incident(g: Graph, incident_id: str) -> dict:
         "status": incident[1],
         "faulted_zone": incident[2],
         "faulted_zones": [row[2] for row in rows],
+        # The agent's own reading of the indicators that led it to the faulted zones.
+        "evidence": incident[3],
         "isolation": [step for plan_id in isolation_plans(g, incident_id)
                       for step in plan_steps(g, plan_id)],
         "switching_order": switching_order(g, incident_id),

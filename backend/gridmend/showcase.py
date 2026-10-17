@@ -4,17 +4,15 @@ import time
 from uuid import uuid4
 
 from falkordb import Graph
+from redis.exceptions import ResponseError
 
-from gridmend.flisr.candidates import TIE_FEEDS_QUERY
 from gridmend.flisr.explain import FEEDING_PATH_QUERY
-from gridmend.flisr.isolate import BOUNDARY_QUERY, faulted_zones, isolation_region
-from gridmend.flisr.locate import LOCATE_QUERY
 from gridmend.flisr.trace import TRACE_QUERY, open_incident
 from gridmend.flisr.transfer import TRANSFER_QUERY, build_flow_network
 from gridmend.flisr.verify import LOADING_QUERY, RADIALITY_QUERY, keep_conducting_edges
 from gridmend.grid.dependency import DEPENDENCY_QUERY
 from gridmend.grid.energize import ENERGIZED_QUERY
-from gridmend.grid.zones import ZONES_QUERY
+from gridmend.grid.zones import ZONE_SWITCHES_QUERY, ZONES_QUERY
 
 MAX_ROWS = 12
 
@@ -33,16 +31,10 @@ STEPS = [
      "What depends on each line right now: buses, load and critical facilities downstream. "
      "The agent can call this as a tool, and the Feeder tab shows it on hover.",
      DEPENDENCY_QUERY, None),
-    ("locate", "Locate", "Fault location",
-     "The faulted zone is the one whose upstream indicator is set while every downstream "
-     "indicator is clear.", LOCATE_QUERY, None),
-    ("isolate", "Isolate", "Isolation boundary",
-     "Every closed switch with exactly one end in the faulted zone is opened. A zone joined "
-     "to it by a switch a crew reported jammed is cut out with it.",
-     BOUNDARY_QUERY, "region"),
-    ("options", "Plan", "Restoration options",
-     "Dead healthy zones that a normally open tie connects to a live zone, heaviest first.",
-     TIE_FEEDS_QUERY, None),
+    ("indicators", "Locate", "What the agent reads",
+     "Every switch with its state, fault indicator and the two zones it joins. The agent "
+     "locates the fault from these indicators and designs isolation and restoration "
+     "switching from them; nothing here decides for it.", ZONE_SWITCHES_QUERY, None),
     ("loading", "Verify", "Line loading",
      "In a radial feeder every bus has one path from the source, so a line carries the load "
      "of the buses whose path uses it. Run on each plan's fork; shown here on the live graph.",
@@ -60,16 +52,14 @@ STEPS = [
      "The switches power crosses from the substation into a zone, used to explain each "
      "restoration.", FEEDING_PATH_QUERY, "path_zone"),
     ("trace", "Explain", "Decision trace",
-     "Every plan, accepted or rejected, is stored with its switch steps under the incident.",
+     "Every plan the agent simulated, passed or rejected, is stored with its switch steps "
+     "under the incident.",
      TRACE_QUERY, "incident"),
 ]
 
 
 # What an empty result means at each step, so "no rows" reads as an answer.
 WHEN_EMPTY = {
-    "locate": "No zone matches: no indicator chain is set, so there is no fault to locate.",
-    "isolate": "Nothing left to open: every boundary switch of the faulted zone is already open.",
-    "options": "No dark healthy zone borders a live zone through a tie right now.",
     "path": "That zone is not fed from the substation.",
 }
 
@@ -109,16 +99,12 @@ def run_on_fork(g: Graph, setup, query: str):
 
 def run_steps(g: Graph) -> list[dict]:
     incident = open_incident(g)
-    zones = faulted_zones(g)
-    region = {z for zone in zones for z in isolation_region(g, zone)}
     available = {
         None: {},
-        "region": {"zones": sorted(region) if zones else None},
         "path_zone": {"zone": path_zone(g)},
         "incident": {"id": incident["id"] if incident else None},
     }
     missing = {
-        "region": "needs a located fault: fault a line first",
         "path_zone": "needs an energized zone",
         "incident": "needs an incident: fault a line first",
     }
@@ -132,7 +118,11 @@ def run_steps(g: Graph) -> list[dict]:
             steps.append({**entry, "skipped": missing[needs]})
             continue
         if needs in FORK_SETUP:
-            result, entry["ms"] = run_on_fork(g, FORK_SETUP[needs], query)
+            try:
+                result, entry["ms"] = run_on_fork(g, FORK_SETUP[needs], query)
+            except ResponseError as exc:
+                steps.append({**entry, "skipped": f"FalkorDB could not run it here: {exc}"})
+                continue
         else:
             start = time.perf_counter()
             result = g.ro_query(query, params)

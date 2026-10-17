@@ -25,7 +25,7 @@ export default function ResultsPage() {
   }, []);
 
   const methods = results?.summary.map((s) => s.method) ?? [];
-  const ours = results?.summary.find((s) => s.method === "gridmend");
+  const ours = results?.summary.find((s) => s.method === "agent");
   const best = results?.summary.find((s) => s.method === "optimal");
   // Every baseline that switches without verification, for the safety comparison.
   const unverified = results?.summary.filter((s) => s.method === "greedy" || s.method === "llm-only") ?? [];
@@ -101,9 +101,9 @@ export default function ResultsPage() {
                 <div className="muted small">hospital, fire station, water pumping, telecom</div>
               </div>
               <div className="kpi">
-                <div className="kpi-label">Time to a plan</div>
-                <div className="kpi-big">{Math.round(ours.mean_plan_ms)} <span className="muted">ms</span></div>
-                <div className="muted small">on average, including every safety check</div>
+                <div className="kpi-label">Time per fault</div>
+                <div className="kpi-big">{Math.round(ours.mean_plan_ms / 1000)} <span className="muted">s</span></div>
+                <div className="muted small">on average for the agent to locate, isolate, design and check</div>
               </div>
             </section>
           )}
@@ -129,7 +129,7 @@ export default function ResultsPage() {
                 </thead>
                 <tbody>
                   {results.summary.map((s) => (
-                    <tr key={s.method} className={s.method === "gridmend" ? "highlight" : undefined}>
+                    <tr key={s.method} className={s.method === "agent" ? "highlight" : undefined}>
                       <th scope="row">
                         {METHODS[s.method] ? <Term hint={METHODS[s.method].hint}>{methodLabel(s.method)}</Term> : s.method}
                       </th>

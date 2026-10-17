@@ -15,13 +15,10 @@ from pydantic import BaseModel
 
 from gridmend import db
 from gridmend.config import load_settings
-from gridmend.flisr.candidates import load_screens, plan_restoration
 from gridmend.flisr.crew import CrewError, CrewModelError, crew_reports, file_report
-from gridmend.flisr.execute import ExecuteError, execute_plan, verified_plans
+from gridmend.flisr.execute import ExecuteError, execute_plan
 from gridmend.flisr.explain import explain_incident
 from gridmend.flisr.generation import generation_status, reconnect_generation
-from gridmend.flisr.isolate import IsolateError, isolate
-from gridmend.flisr.locate import LocateError, locate_fault
 from gridmend.flisr.trace import incident_trace, open_incident, plan_details
 from gridmend.grid.case33 import load_voltages
 from gridmend.grid.dependency import line_dependencies
@@ -36,14 +33,13 @@ def graph_name() -> str:
 
 
 def load_caches() -> None:
-    # Screens and power flows computed while building the evaluation make the first plan on a
-    # slow host as fast as later ones; pandapower, slow to import there, then only loads for a
+    # Power flows computed while building the evaluation make a simulation on a slow host as
+    # fast as on a laptop; pandapower, slow to import there, then only loads for a
     # configuration the evaluation never saw.
     from eval.run import out_dir
 
     for name in feeder.FEEDERS:
         with feeder.use(name):
-            load_screens(out_dir() / "screens.json")
             load_voltages(out_dir() / "voltages.json")
 
 
@@ -85,11 +81,6 @@ class ExecuteRequest(BaseModel):
 
 class CrewRequest(BaseModel):
     note: str
-
-
-class WhatIfRequest(BaseModel):
-    switches: list[str]
-    fault_line: str | None = None
 
 
 def live():
@@ -185,27 +176,6 @@ def fault(request: FaultRequest) -> dict:
     return {"line": lines[0], "lines": lines, "indicators_set": tripped}
 
 
-@app.post("/locate")
-def locate() -> dict:
-    try:
-        location = locate_fault(live())
-    except LocateError as exc:
-        raise HTTPException(400, str(exc))
-    return {"zone": location.zone, "chain": location.chain, "zones": location.zones,
-            "chains": {str(z): chain for z, chain in location.chains.items()}}
-
-
-@app.post("/isolate")
-def isolate_fault() -> dict:
-    try:
-        g = live()
-        incident_id, ops = isolate(g)
-    except IsolateError as exc:
-        raise HTTPException(400, str(exc))
-    return {"incident": incident_id, "ops": [{"switch_id": o.switch_id, "op": o.op} for o in ops],
-            "tripped_again": open_incident(g)["status"] == "tripped"}
-
-
 @app.get("/generation")
 def generation() -> dict:
     return {"units": generation_status(live())}
@@ -217,51 +187,15 @@ def reconnect() -> dict:
     return reconnect_generation(live())
 
 
-@app.post("/plan")
-def plan() -> dict:
-    conn = db.connect()
-    g = conn.select_graph(graph_name())
-    incident = current_incident(g)
-    if incident["status"] != "isolated":
-        raise HTTPException(409, f"incident is {incident['status']}, not isolated")
-
-    results = plan_restoration(conn, g, incident["id"])
-    # Recommend from this round only: planning again (e.g. after a crew report) leaves the
-    # earlier plans in the trace, and the operator chooses from the list just shown.
-    current = {r.plan_id for _, r in results}
-    ranked = [p for p in verified_plans(g, incident["id"]) if p["id"] in current]
-    critical = {p["id"]: p["critical"] for p in ranked}
-    return {
-        "incident": incident["id"],
-        "recommended": ranked[0]["id"] if ranked else None,
-        "candidates": [
-            {
-                "plan_id": r.plan_id,
-                "origin": c.origin,
-                "score": c.score,
-                "ops": [{"switch_id": o.switch_id, "op": o.op} for o in c.ops],
-                "passed": r.passed,
-                "restored_zones": r.restored_zones,
-                "dropped_zones": r.dropped_zones,
-                "restored_kw": r.restored_kw,
-                "critical": critical.get(r.plan_id, []),
-                "min_v_pu": r.min_v_pu,
-                "max_loading_pct": r.max_loading_pct,
-                "violations": [{"type": k, "detail": d} for k, d in r.violations],
-            }
-            for c, r in results
-        ],
-    }
-
-
 @app.post("/execute")
 def execute(request: ExecuteRequest) -> dict:
     # The operator's click in the UI is the approval.
     try:
-        ops = execute_plan(live(), request.plan_id)
+        ops, tripped = execute_plan(live(), request.plan_id)
     except ExecuteError as exc:
         raise HTTPException(400, str(exc))
-    return {"plan_id": request.plan_id, "ops": [{"switch_id": s, "op": op} for s, op in ops]}
+    return {"plan_id": request.plan_id, "ops": [{"switch_id": s, "op": op} for s, op in ops],
+            "tripped_again": tripped}
 
 
 @app.get("/explain")
@@ -282,11 +216,9 @@ def plans() -> dict:
     g = live()
     incident = current_incident(g)
     details = plan_details(g, incident["id"])
-    agent_pick = next((p["plan_id"] for p in details if p["recommended"]), None)
-    ranked = verified_plans(g, incident["id"])
     return {
         "incident": incident["id"],
-        "recommended": agent_pick or (ranked[0]["id"] if ranked else None),
+        "recommended": next((p["plan_id"] for p in details if p["recommended"]), None),
         # Dropped zones are only known during verification, so plans read back from the trace
         # report none.
         "candidates": [{**p, "passed": p["status"] != "rejected", "dropped_zones": []}
@@ -317,7 +249,10 @@ def agent_run() -> StreamingResponse:
     conn = db.connect()
     g = conn.select_graph(graph_name())
     faulted = g.ro_query("MATCH ()-[s:SEG {faulted: true}]->() RETURN count(s)").result_set[0][0]
-    if not faulted or open_incident(g):
+    incident = open_incident(g)
+    # The agent takes over a tripped feeder, or an isolated one that needs (re)planning, e.g.
+    # after a crew report or once generation is back.
+    if not faulted or (incident and incident["status"] == "restored"):
         raise HTTPException(409, "the agent starts from a tripped breaker: fault a line first")
     if not _agent_lock.acquire(blocking=False):
         raise HTTPException(429, "the agent is already working an incident; try again shortly")
@@ -431,7 +366,7 @@ def dependencies() -> dict:
 
 @app.get("/risk")
 def risk() -> dict:
-    """Per faulted line: what stays dark after the best safe restoration, from the evaluation."""
+    """Per faulted line: what stays dark after the agent's restoration, from the evaluation."""
     from eval.run import load_results
 
     rows = load_results()
@@ -440,7 +375,7 @@ def risk() -> dict:
     return {"lines": [
         {"line": r.fault, "unserved_kw": r.unserved_kw, "restored_kw": r.restored_kw,
          "critical_dark": [c for c in r.critical_dark.split(";") if c]}
-        for r in rows if r.method == "gridmend"
+        for r in rows if r.method == "agent"
     ]}
 
 
@@ -452,17 +387,6 @@ def results() -> dict:
     if rows is None:
         raise HTTPException(404, "no evaluation results yet; run `gridmend eval`")
     return {"summary": summarize(rows), "rows": [asdict(r) for r in rows]}
-
-
-@app.post("/whatif")
-def whatif(request: WhatIfRequest) -> dict:
-    from gridmend.flisr.whatif import WhatIfError, what_if
-
-    conn = db.connect()
-    try:
-        return what_if(conn, conn.select_graph(graph_name()), request.switches, request.fault_line)
-    except (WhatIfError, FaultError, LocateError, IsolateError) as exc:
-        raise HTTPException(400, str(exc))
 
 
 @app.get("/crew")

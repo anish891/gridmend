@@ -87,7 +87,7 @@ export default function AskPanel({ incident, questions, onFocus }: Props) {
           type="text"
           value={question}
           maxLength={300}
-          placeholder="Ask about lines, zones, critical sites or what-ifs"
+          placeholder="Ask about lines, zones, critical sites or the incident"
           aria-label="Question about the grid"
           onChange={(e) => setQuestion(e.target.value)}
           disabled={running}

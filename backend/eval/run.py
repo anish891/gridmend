@@ -4,11 +4,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import openai
 from falkordb import FalkorDB, Graph
 
-from gridmend.flisr.candidates import cached_screen, greedy_candidate, read_situation, save_screens
-from gridmend.flisr.execute import restore
-from gridmend.flisr.isolate import secure
+from eval.greedy import greedy_candidate
+from eval.isolation import secure
 from gridmend.flisr.trace import SwitchOp
 from gridmend.flisr.verify import verify_plan
 from gridmend.grid import feeder
@@ -25,9 +25,10 @@ OUT_ROOT = Path(__file__).resolve().parent / "out"
 def out_dir() -> Path:
     # The IEEE 33-bus results stay where they always were; other feeders get a subfolder.
     return OUT_ROOT if feeder.name() == "ieee33" else OUT_ROOT / feeder.name()
-# The LLM-only baseline needs a model endpoint and is not deterministic, so `eval --llm-only`
-# records its rows here and later runs, including the image build, replay them.
-RECORDED_LLM = Path(__file__).resolve().parent / "llm_only.csv"
+# Model-driven methods need an endpoint and are not deterministic, so a run with a model records
+# their rows here and later runs, including the image build, replay them.
+RECORDED = {"llm-only": Path(__file__).resolve().parent / "llm_only.csv",
+            "agent": Path(__file__).resolve().parent / "agent.csv"}
 
 
 @dataclass
@@ -85,7 +86,7 @@ def score_unverified(db: FalkorDB, g: Graph, incident_id: str, line: str, method
 def run_greedy(db: FalkorDB, line: str) -> Row:
     g, incident_id = isolated_graph(db, line)
     start = time.perf_counter()
-    candidate = greedy_candidate(cached_screen(g), read_situation(g))
+    candidate = greedy_candidate(g)
     plan_ms = 1000 * (time.perf_counter() - start)
     ops = list(candidate.ops) if candidate else []
     return score_unverified(db, g, incident_id, line, "greedy", ops, plan_ms)
@@ -150,27 +151,71 @@ def run_llm_only(db: FalkorDB, line: str, client, model: str) -> Row:
     return row
 
 
-def run_gridmend(db: FalkorDB, oracle: "Feeder | None", line: str) -> Row:
-    g, incident_id = isolated_graph(db, line)
+def served(g: Graph) -> tuple[float, int]:
+    kw, critical = g.ro_query(
+        "MATCH (b:Bus {energized: true}) RETURN sum(b.p_kw), sum(CASE WHEN b.critical THEN 1 ELSE 0 END)"
+    ).result_set[0]
+    return kw or 0.0, critical
+
+
+def run_agent_row(db: FalkorDB, line: str, client, model: str) -> Row:
+    """The LLM agent handles the fault end to end: it reads the indicators, isolates and
+    restores on its own. It is scored against the same isolated feeder as every other method,
+    so load it brings back counts whether its isolation or its restoration returned it."""
+    from gridmend.agent.loop import run_agent
+    from gridmend.agent.tools import GridTools
+    from gridmend.flisr.trace import open_incident
+
+    baseline, _ = isolated_graph(db, line)
+    isolated_kw, isolated_critical = served(baseline)
+    baseline.delete()
+
+    g = db.select_graph(feeder.base_graph()).copy(EVAL_GRAPH)
+    apply_fault(g, line)
     start = time.perf_counter()
-    _, executed = restore(db, g, incident_id, approve=lambda plan: True)
+    try:
+        run_agent(client, model, GridTools(db, g, approve=lambda plan: True))
+    except openai.APIError:
+        # A provider hiccup is not the agent's mistake: start the fault over once.
+        g.delete()
+        g = db.select_graph(feeder.base_graph()).copy(EVAL_GRAPH)
+        apply_fault(g, line)
+        start = time.perf_counter()
+        run_agent(client, model, GridTools(db, g, approve=lambda plan: True))
     plan_ms = 1000 * (time.perf_counter() - start)
     unserved_kw, critical_dark = left_dark(g)
-    if executed is None:
-        return Row(line, "gridmend", 0.0, 0, 0, 0, plan_ms,
+    incident = open_incident(g)
+    if incident is None or incident["status"] not in ("isolated", "restored"):
+        # The fault was never isolated, so the breaker stays open: safe, but nothing is restored.
+        return Row(line, "agent", 0.0, 0, 0, 0, plan_ms,
                    unserved_kw=unserved_kw, critical_dark=critical_dark)
 
-    # Re-check the executed configuration with the independent oracle, where there is one; the
-    # oracle handles one substation, so a two-substation feeder relies on the fork checks alone.
-    violations = 0
-    if oracle is not None:
-        closed = frozenset(row[0] for row in g.ro_query(
-            "MATCH ()-[s:SW {status: 'closed'}]->() RETURN s.id"
-        ).result_set)
-        violations = len(oracle.evaluate(closed, oracle.isolated_state(line)[0]).violations)
-    return Row(line, "gridmend", executed["restored_kw"], len(executed["critical"]),
-               executed["switch_ops"], violations, plan_ms,
+    kw, critical = served(g)
+    ops = g.ro_query(
+        """
+        MATCH (:Incident {id: $id})-[:HAS_PLAN]->(p:Plan {kind: 'restoration', status: 'executed'})
+        RETURN sum(p.switch_ops)
+        """,
+        {"id": incident["id"]},
+    ).result_set[0][0] or 0
+    # FalkorDB returns sums as floats; the counts are whole numbers.
+    return Row(line, "agent", max(kw - isolated_kw, 0.0), int(max(critical - isolated_critical, 0)),
+               int(ops), len(oracle_violations(g, line)), plan_ms,
                unserved_kw=unserved_kw, critical_dark=critical_dark)
+
+
+def oracle_violations(g: Graph, line: str) -> tuple[str, ...]:
+    # The independent oracle re-checks the final configuration where there is one; it handles
+    # one substation, so a two-substation feeder relies on the fork checks alone.
+    if feeder.name() != "ieee33":
+        return ()
+    from eval.optimal import Feeder
+
+    oracle = Feeder()
+    closed = frozenset(row[0] for row in g.ro_query(
+        "MATCH ()-[s:SW {status: 'closed'}]->() RETURN s.id"
+    ).result_set)
+    return oracle.evaluate(closed, oracle.isolated_state(line)[0]).violations
 
 
 def left_dark(g: Graph) -> tuple[float, str]:
@@ -210,40 +255,13 @@ def run_all(db: FalkorDB, extra_methods=()) -> list[Row]:
         optimal = run_optimal(oracle, line) if oracle else None
         scenario = [Row(line, "isolate-only", 0.0, 0, 0, 0, 0.0), run_greedy(db, line)]
         scenario += [method(db, line) for method in extra_methods]
-        scenario += [run_gridmend(db, oracle, line)] + ([optimal] if optimal else [])
+        scenario += [optimal] if optimal else []
         for row in scenario:
             row.optimal_kw = optimal.restored_kw if optimal else 0.0
         rows += scenario
     if EVAL_GRAPH in db.list_graphs():
         db.select_graph(EVAL_GRAPH).delete()
     return rows
-
-
-def warm_demo_caches(db: FalkorDB) -> None:
-    """Plan the UI's multi-step demos once, so their screens and power flows ship with the
-    results: on a host with a tenth of a CPU an uncached power flow takes seconds."""
-    from gridmend.flisr.candidates import plan_restoration
-    from gridmend.flisr.generation import reconnect_generation
-    from gridmend.grid.load import load_assumptions
-    from gridmend.sim import apply_faults
-
-    demos = load_assumptions().get("warm", {})
-    scenarios = [(lines, False) for lines in demos.get("faults", [])]
-    scenarios += [([line], True) for line in demos.get("staged", [])]
-    for lines, staged in scenarios:
-        if EVAL_GRAPH in db.list_graphs():
-            db.select_graph(EVAL_GRAPH).delete()
-        g = db.select_graph(feeder.base_graph()).copy(EVAL_GRAPH)
-        apply_faults(g, lines)
-        incident_id, _ = secure(g)
-        if staged:
-            # Restore once, bring generation back, and plan the second stage.
-            restore(db, g, incident_id, approve=lambda plan: True)
-            if not reconnect_generation(g)["replan"]:
-                continue
-        plan_restoration(db, g, incident_id)
-    if EVAL_GRAPH in db.list_graphs():
-        db.select_graph(EVAL_GRAPH).delete()
 
 
 def summarize(rows: list[Row]) -> list[dict]:
@@ -299,9 +317,7 @@ def write_outputs(rows: list[Row], summary: list[dict]) -> Path:
         writer.writeheader()
         writer.writerows(asdict(r) for r in rows)
     (out / "results.md").write_text(markdown(rows, summary))
-    # Every fault's candidate screens and verified power flows were just computed; ship them so a
-    # deployed API starts warm.
-    save_screens(out / "screens.json")
+    # Every power flow the evaluation ran ships with the results, so a deployed API starts warm.
     save_voltages(out / "voltages.json")
     return out
 
@@ -310,21 +326,22 @@ def load_results() -> list[Row] | None:
     return read_rows(out_dir() / "results.csv")
 
 
-def record_llm_only(rows: list[Row]) -> None:
-    with open(RECORDED_LLM, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(asdict(rows[0])))
-        writer.writeheader()
-        writer.writerows(asdict(r) for r in rows if r.method == "llm-only")
+def record_rows(rows: list[Row], methods: list[str]) -> None:
+    for method in methods:
+        with open(RECORDED[method], "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(asdict(rows[0])))
+            writer.writeheader()
+            writer.writerows(asdict(r) for r in rows if r.method == method)
 
 
-def with_recorded_llm_only(rows: list[Row]) -> list[Row]:
-    """Insert the recorded LLM-only rows after each fault's greedy row."""
-    recorded = {r.fault: r for r in read_rows(RECORDED_LLM) or []}
+def with_recorded_rows(rows: list[Row], methods: list[str]) -> list[Row]:
+    """Insert recorded model-driven rows after each fault's greedy row, before optimal."""
+    recorded = {m: {r.fault: r for r in read_rows(RECORDED[m]) or []} for m in methods}
     merged = []
     for row in rows:
         merged.append(row)
-        if row.method == "greedy" and row.fault in recorded:
-            merged.append(recorded[row.fault])
+        if row.method == "greedy":
+            merged += [recorded[m][row.fault] for m in methods if row.fault in recorded[m]]
     return merged
 
 

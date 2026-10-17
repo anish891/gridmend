@@ -4,16 +4,11 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import type { Results } from "@/lib/api";
 import { currentFeeder, withFeeder, type FeederConfig } from "@/lib/feeders";
-import Segmented from "@/components/ui/Segmented";
-
-export type Mode = "rules" | "agent";
 
 type Props = {
   disabled: boolean;
   onFault: (line: string | string[]) => void;
   agentModel: string | null;
-  mode: Mode;
-  onMode: (mode: Mode) => void;
   onDemo: () => void;
   feeder: FeederConfig;
   // The evaluation's headline numbers, when results are available.
@@ -21,7 +16,7 @@ type Props = {
 };
 
 function Headline({ results }: { results: Results }) {
-  const ours = results.summary.find((s) => s.method === "gridmend");
+  const ours = results.summary.find((s) => s.method === "agent");
   const optimum = results.summary.some((s) => s.method === "optimal");
   // The strongest unchecked baseline the evaluation has: the AI alone, else greedy switching.
   const rival = results.summary.find((s) => s.method === "llm-only")
@@ -47,27 +42,34 @@ function Headline({ results }: { results: Results }) {
 }
 
 export default function FaultPicker(
-  { disabled, onFault, agentModel, mode, onMode, onDemo, results, feeder }: Props,
+  { disabled, onFault, agentModel, onDemo, results, feeder }: Props,
 ) {
+  // Every incident is worked by the agent, so without a model there is nothing to run.
+  const off = disabled || !agentModel;
   return (
     <Card className="hero">
-      <h1>Simulate a fault and watch the feeder heal itself</h1>
+      <h1>Simulate a fault and watch an AI agent heal the feeder</h1>
       <p className="hero-lead">
-        GridMend finds the damaged section, cuts it out and re-routes power around it. Every plan is
-        safety-checked on a copy of the grid before a single switch moves.
+        The agent reads the fault indicators, finds the damaged section, cuts it out and designs how
+        to re-route power around it. Every plan it designs is tested on a copy of the grid, and only
+        plans that pass move a real switch.
       </p>
       {results && <Headline results={results} />}
+      {!agentModel && (
+        <p className="muted">No language model is configured on this server, so the agent cannot run.</p>
+      )}
       <div className="hero-demo">
-        <Button disabled={disabled} onClick={onDemo}>
+        <Button disabled={off} onClick={onDemo}>
           <span aria-hidden="true">▶</span> Play the demo
         </Button>
         <span className="muted small">
-          About 30 seconds: a fault, the plans that fail and why, then the restoration.
+          About a minute: the agent locates and isolates the fault, tries designs, learns why some
+          fail, then restores.
         </span>
       </div>
       <div className="demo-faults">
         {feeder.faults.map((f) => (
-          <button key={f.line} type="button" className="demo-fault" disabled={disabled} onClick={() => onFault(f.line)}>
+          <button key={f.line} type="button" className="demo-fault" disabled={off} onClick={() => onFault(f.line)}>
             <span className="demo-title">{f.title}</span>
             <span className="demo-line">line {f.line}</span>
             <span className="demo-note">{f.note}</span>
@@ -77,7 +79,7 @@ export default function FaultPicker(
       <h3 className="double-title">Or two faults at once</h3>
       <div className="double-faults">
         {feeder.doubles.map((f) => (
-          <button key={f.title} type="button" className="demo-fault double" disabled={disabled} onClick={() => onFault(f.lines)}>
+          <button key={f.title} type="button" className="demo-fault double" disabled={off} onClick={() => onFault(f.lines)}>
             <span className="demo-title">{f.title}</span>
             <span className="demo-line">lines {f.lines.join(" + ")}</span>
             <span className="demo-note">{f.note}</span>
@@ -86,17 +88,7 @@ export default function FaultPicker(
       </div>
       <div className="hero-foot">
         <p className="muted small">Or click any line on the feeder map below.</p>
-        {agentModel && (
-          <Segmented
-            label="Who handles the incident"
-            value={mode}
-            onChange={onMode}
-            options={[
-              { value: "rules", label: "Rules", hint: "instant and deterministic" },
-              { value: "agent", label: "AI operator agent", hint: `${agentModel}, takes 1 to 2 minutes` },
-            ]}
-          />
-        )}
+        {agentModel && <p className="muted small">Agent: {agentModel}</p>}
       </div>
     </Card>
   );

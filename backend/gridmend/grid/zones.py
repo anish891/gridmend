@@ -87,6 +87,15 @@ def zone_table(g: Graph) -> list[dict]:
     return [zones[zid] for zid in sorted(zones)]
 
 
+# Every switch with its state, indicator and the zones it joins, upstream zone first.
+ZONE_SWITCHES_QUERY = """
+MATCH (x:Bus)-[s:SW]->(y:Bus)-[:IN_ZONE]->(zb:Zone)
+OPTIONAL MATCH (x)-[:IN_ZONE]->(za:Zone)
+RETURN s.id, s.kind, s.status, s.operable, s.cap_kva, s.fi, za.id AS from_zone, zb.id AS to_zone
+ORDER BY s.kind, s.id
+"""
+
+
 def zone_state(energized: bool, faulted: bool, cut_off: bool) -> str:
     if faulted:
         return "faulted"
@@ -97,7 +106,8 @@ def zone_state(energized: bool, faulted: bool, cut_off: bool) -> str:
 
 def zone_map(g: Graph) -> dict:
     """The feeder at the level an operator switches it: each zone with its load and state, and
-    each switch with the zones it joins. A breaker joins a substation to its first zone."""
+    each switch with the zones it joins and its fault indicator. A breaker or sectionalizer
+    lists the zone nearer the substation first; a breaker joins a substation to its first zone."""
     critical: dict[int, list[str]] = {}
     for zid, facility in g.ro_query(
         "MATCH (b:Bus {critical: true}) RETURN b.zone, b.facility ORDER BY b.id"
@@ -117,14 +127,10 @@ def zone_map(g: Graph) -> dict:
     switches = [
         {"id": switch_id, "kind": kind, "status": status, "cap_kva": round(cap),
          "joins": [f"Z{a}" if a is not None else "substation", f"Z{b}"],
+         **({"indicator": fi} if fi != "none" else {}),
          **({"jammed": True} if operable is False else {})}
-        for switch_id, kind, status, operable, cap, a, b in g.ro_query(
-            """
-            MATCH (x:Bus)-[s:SW]->(y:Bus)-[:IN_ZONE]->(zb:Zone)
-            OPTIONAL MATCH (x)-[:IN_ZONE]->(za:Zone)
-            RETURN s.id, s.kind, s.status, s.operable, s.cap_kva, za.id, zb.id
-            ORDER BY s.kind, s.id
-            """
+        for switch_id, kind, status, operable, cap, fi, a, b in g.ro_query(
+            ZONE_SWITCHES_QUERY
         ).result_set
     ]
     return {"zones": zones, "switches": switches}

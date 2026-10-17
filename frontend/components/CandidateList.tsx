@@ -14,9 +14,6 @@ type Props = {
 };
 
 const ORIGIN = {
-  greedy: "Quick fix: close a backup switch into every dark section",
-  "tie-only": "One backup switch, nothing else opened",
-  repaired: "Backup switches plus openings that avoid loops and overloads",
   agent: "Designed by the AI operator agent",
   manual: "Entered by hand",
 };
@@ -65,9 +62,9 @@ function Recommendation({ plan, rank, busy, onApprove }: {
   return (
     <div className="recommend">
       <p>
-        <b>Recommended: plan #{rank}.</b> It restores {Math.round(plan.restored_kw)} kW
+        <b>The agent recommends plan #{rank}.</b> It restores {Math.round(plan.restored_kw)} kW
         {plan.critical.length > 0 && <>, including the {plan.critical.join(" and ")}</>}, and passed every
-        safety check.
+        check in simulation.
       </p>
       <Button disabled={busy} onClick={() => onApprove(plan.plan_id)}>Approve recommended plan</Button>
     </div>

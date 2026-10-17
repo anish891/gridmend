@@ -1,7 +1,6 @@
 import pytest
 
-from gridmend.flisr.isolate import IsolateError, isolate
-from gridmend.flisr.locate import locate_fault
+from eval.isolation import IsolateError, isolate, locate_fault
 from gridmend.flisr.trace import incident_trace
 from gridmend.grid.energize import grid_status
 from gridmend.sim import apply_fault
