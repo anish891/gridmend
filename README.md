@@ -196,9 +196,8 @@ Energized buses: reachability through segments and closed switches
 
 ```cypher
 MATCH (s:Bus {is_source: true})
-MATCH p = (s)-[:SEG|SW*0..40]-(b:Bus)
-WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
-RETURN DISTINCT b.id
+MATCH p = (s)-[:SEG|SW*0..100 {status: 'closed'}]-(b:Bus)
+RETURN DISTINCT b.id AS bus
 ```
 
 What the agent reads: every switch with its state, indicator and the zones on each side
@@ -220,32 +219,32 @@ RETURN a.id
 ```
 
 Line loading on a fork: in a radial feeder each energized bus has one path from the source, so
-summing the loads of the buses behind each edge gives the edge's flow
+summing the loads of the buses behind each edge, net of any solar online there, gives the edge's
+flow
 ([verify.py](backend/gridmend/flisr/verify.py)).
 
 ```cypher
 MATCH (s:Bus {is_source: true})
-MATCH p = (s)-[:SEG|SW*0..40]-(b:Bus {energized: true})
-WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
+MATCH p = (s)-[:SEG|SW*0..100 {status: 'closed'}]-(b:Bus {energized: true})
 UNWIND relationships(p) AS r
-WITH r, sum(b.p_kw) AS p_kw, sum(b.q_kvar) AS q_kvar
-RETURN r.id, sqrt(p_kw * p_kw + q_kvar * q_kvar), r.cap_kva
+WITH r, sum(b.p_kw - CASE WHEN coalesce(b.dg_online, false) THEN b.dg_kw ELSE 0 END) AS p_kw, sum(b.q_kvar) AS q_kvar
+RETURN r.id AS line, sqrt(p_kw * p_kw + q_kvar * q_kvar) AS kva, r.cap_kva AS rating_kva
 ```
 
-Radiality on a fork that keeps only conducting edges: the source's spanning tree covers every
-energized bus, and any conducting edge it leaves out closes a loop. Ties weigh more, so the loop
-is reported at the tie that closed it.
+Radiality on a fork that keeps only conducting edges: each substation's spanning tree covers the
+buses it energizes, and any conducting edge a tree leaves out closes a loop. Ties weigh more, so
+the loop is reported at the tie that closed it, and a tree that reaches two substations joins
+them into one network.
 
 ```cypher
-MATCH (s:Bus {is_source: true})
 CALL algo.MSF({nodeLabels: ['Bus'], relationshipTypes: ['SEG', 'SW'],
                weightAttribute: 'tree_weight'})
 YIELD nodes, edges
-WITH s, nodes, edges WHERE s IN nodes
-WITH nodes, [e IN edges | e.id] AS tree
+WITH nodes, [e IN edges | e.id] AS tree, [n IN nodes WHERE n.is_source | n.id] AS sources
+WHERE size(sources) > 0
 OPTIONAL MATCH (a:Bus)-[r:SEG|SW]->(:Bus)
 WHERE a IN nodes AND NOT r.id IN tree
-RETURN size(nodes), collect(r.id)
+RETURN size(nodes) AS energized_buses, sources, collect(r.id) AS loop_edges
 ```
 
 Forking is `GRAPH.COPY grid_live fork_<planId>`. The checks run on the fork, the outcome is
@@ -257,11 +256,13 @@ Transfer limit on a throwaway copy where every line is a pair of `FLOW` edges an
 load drains into one sink ([transfer.py](backend/gridmend/flisr/transfer.py)).
 
 ```cypher
-MATCH (s:Bus {is_source: true}), (t:Sink)
-CALL algo.maxFlow({sourceNodes: [s], targetNodes: [t], capacityProperty: 'cap_kva',
+MATCH (s:Bus {is_source: true})
+WITH collect(s) AS sources
+MATCH (t:Sink)
+CALL algo.maxFlow({sourceNodes: sources, targetNodes: [t], capacityProperty: 'cap_kva',
                    relationshipTypes: ['FLOW']})
 YIELD edges, edgeFlows, maxFlow
-RETURN maxFlow,
+RETURN maxFlow AS deliverable_kva,
        [i IN range(0, size(edges) - 1)
         WHERE edges[i].id IS NOT NULL AND edgeFlows[i] >= edges[i].cap_kva - 0.001
         | edges[i].id] AS saturated
@@ -272,10 +273,10 @@ Explanation: the feeding path of a restored zone
 
 ```cypher
 MATCH (s:Bus {is_source: true}), (t:Bus {id: $zone})
-MATCH p = (s)-[:SEG|SW*0..40]-(t)
-WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
-RETURN [r IN relationships(p) WHERE type(r) = 'SW' | r.id]
-ORDER BY length(p) LIMIT 1
+MATCH p = (s)-[:SEG|SW*0..100 {status: 'closed'}]-(t)
+RETURN [r IN relationships(p) WHERE type(r) = 'SW' | r.id] AS switches
+ORDER BY length(p)
+LIMIT 1
 ```
 
 ## Evaluation
