@@ -219,6 +219,33 @@ def run_all(db: FalkorDB, extra_methods=()) -> list[Row]:
     return rows
 
 
+def warm_demo_caches(db: FalkorDB) -> None:
+    """Plan the UI's multi-step demos once, so their screens and power flows ship with the
+    results: on a host with a tenth of a CPU an uncached power flow takes seconds."""
+    from gridmend.flisr.candidates import plan_restoration
+    from gridmend.flisr.generation import reconnect_generation
+    from gridmend.grid.load import load_assumptions
+    from gridmend.sim import apply_faults
+
+    demos = load_assumptions().get("warm", {})
+    scenarios = [(lines, False) for lines in demos.get("faults", [])]
+    scenarios += [([line], True) for line in demos.get("staged", [])]
+    for lines, staged in scenarios:
+        if EVAL_GRAPH in db.list_graphs():
+            db.select_graph(EVAL_GRAPH).delete()
+        g = db.select_graph(feeder.base_graph()).copy(EVAL_GRAPH)
+        apply_faults(g, lines)
+        incident_id, _ = secure(g)
+        if staged:
+            # Restore once, bring generation back, and plan the second stage.
+            restore(db, g, incident_id, approve=lambda plan: True)
+            if not reconnect_generation(g)["replan"]:
+                continue
+        plan_restoration(db, g, incident_id)
+    if EVAL_GRAPH in db.list_graphs():
+        db.select_graph(EVAL_GRAPH).delete()
+
+
 def summarize(rows: list[Row]) -> list[dict]:
     methods = list(dict.fromkeys(r.method for r in rows))
     optimal_total = sum(r.restored_kw for r in rows if r.method == "optimal")

@@ -3,8 +3,7 @@ from falkordb import Graph
 # A bus is energized when some path from the source runs only over segments and closed switches.
 ENERGIZED_QUERY = """
 MATCH (s:Bus {is_source: true})
-MATCH p = (s)-[:SEG|SW*0..100]-(b:Bus)
-WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
+MATCH p = (s)-[:SEG|SW*0..100 {status: 'closed'}]-(b:Bus)
 RETURN DISTINCT b.id AS bus
 """
 

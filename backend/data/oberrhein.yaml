@@ -17,3 +17,8 @@ weights:
 # The case's load scaling (0.6) is applied; its generators are scaled to zero, so none modelled.
 voltage_min_pu: 0.90
 voltage_max_pu: 1.05
+
+# Demos the UI runs in more than one step; `gridmend eval` plans them too so their power flows
+# ship with the results.
+warm:
+  faults: [["13-19", "27-33"], ["13-19", "101-108"]]

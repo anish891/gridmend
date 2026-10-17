@@ -117,12 +117,15 @@ def write_graph(db: FalkorDB) -> dict:
         g.query(f"CREATE INDEX FOR (n:{label}) ON (n.id)")
 
     g.query("UNWIND $rows AS r CREATE (b:Bus) SET b = r", {"rows": buses})
+    # A segment always conducts. Giving it the same status as a closed switch lets path queries
+    # filter inline ({status: 'closed'}), which FalkorDB applies while expanding instead of after.
     g.query(
         """
         UNWIND $rows AS r
         MATCH (a:Bus {id: r.a}), (b:Bus {id: r.b})
         CREATE (a)-[:SEG {id: r.id, r_ohm: r.r_ohm, x_ohm: r.x_ohm,
-                          cap_kva: r.cap_kva, faulted: false}]->(b)
+                          cap_kva: r.cap_kva, faulted: false,
+                          status: 'closed', normally: 'closed'}]->(b)
         """,
         {"rows": segs},
     )

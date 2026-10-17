@@ -4,8 +4,7 @@ from falkordb import Graph
 # energized bus has one path from the source and depends on every line along it.
 DEPENDENCY_QUERY = """
 MATCH (s:Bus {is_source: true})
-MATCH p = (s)-[:SEG|SW*0..100]-(b:Bus {energized: true})
-WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
+MATCH p = (s)-[:SEG|SW*0..100 {status: 'closed'}]-(b:Bus {energized: true})
 UNWIND relationships(p) AS r
 WITH r, count(b) AS buses, sum(b.p_kw) AS kw,
      collect(CASE WHEN b.critical THEN b.facility END) AS critical

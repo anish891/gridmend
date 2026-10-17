@@ -380,8 +380,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def cmd_eval(args: argparse.Namespace) -> int:
     from eval.run import (
-        markdown, record_llm_only, run_all, run_llm_only, summarize, with_recorded_llm_only,
-        write_outputs,
+        markdown, record_llm_only, run_all, run_llm_only, summarize, warm_demo_caches,
+        with_recorded_llm_only, write_outputs,
     )
 
     extra = []
@@ -391,6 +391,7 @@ def cmd_eval(args: argparse.Namespace) -> int:
         client, model = make_client()
         extra.append(lambda conn, line: run_llm_only(conn, line, client, model))
     rows = run_all(db.connect(), extra)
+    warm_demo_caches(db.connect())
     from gridmend.grid import feeder
 
     if args.llm_only:

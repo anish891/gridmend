@@ -19,6 +19,9 @@ FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:0.12.23 AS uv-native
 FROM ghcr.io/astral-sh/uv:0.12.23 AS uv-target
 
 FROM --platform=$BUILDPLATFORM ${FALKORDB_IMAGE} AS results
+# FalkorDB's defaults with a 10 s query ceiling instead of 1 s: a slow host (the free tier has a
+# tenth of a CPU) still finishes the heavier planning queries, and runaway queries are still cut.
+ENV FALKORDB_ARGS="MAX_QUEUED_QUERIES 25 TIMEOUT 10000 RESULTSET_SIZE 10000"
 COPY --from=uv-native /uv /usr/local/bin/uv
 ENV UV_PYTHON_INSTALL_DIR=/opt/python UV_LINK_MODE=copy PATH=/opt/venv/bin:$PATH
 WORKDIR /app
@@ -35,6 +38,7 @@ RUN deploy/falkordb.sh && gridmend load && gridmend eval > /dev/null \
     && redis-cli shutdown nosave
 
 FROM ${FALKORDB_IMAGE}
+ENV FALKORDB_ARGS="MAX_QUEUED_QUERIES 25 TIMEOUT 10000 RESULTSET_SIZE 10000"
 COPY --from=uv-target /uv /usr/local/bin/uv
 ENV UV_PYTHON_INSTALL_DIR=/opt/python UV_LINK_MODE=copy PATH=/opt/venv/bin:$PATH PORT=7860
 WORKDIR /app

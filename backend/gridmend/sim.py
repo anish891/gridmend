@@ -48,8 +48,7 @@ def trip(g: Graph) -> list[str]:
         for switch_id in g.ro_query(
             """
             MATCH (s:Bus {is_source: true})
-            MATCH p = (s)-[:SEG|SW*0..100]-(:Bus {id: $bus})
-            WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
+            MATCH p = (s)-[:SEG|SW*0..100 {status: 'closed'}]-(:Bus {id: $bus})
             RETURN [r IN relationships(p) WHERE type(r) = 'SW' | r.id]
             ORDER BY length(p)
             LIMIT 1

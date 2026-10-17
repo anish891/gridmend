@@ -121,8 +121,7 @@ def check_radiality(fork: Graph) -> list[tuple[str, str]]:
 
 LOADING_QUERY = f"""
 MATCH (s:Bus {{is_source: true}})
-MATCH p = (s)-[:SEG|SW*0..100]-(b:Bus {{energized: true}})
-WHERE all(r IN relationships(p) WHERE type(r) = 'SEG' OR r.status = 'closed')
+MATCH p = (s)-[:SEG|SW*0..100 {{status: 'closed'}}]-(b:Bus {{energized: true}})
 UNWIND relationships(p) AS r
 WITH r, sum({NET_P_KW}) AS p_kw, sum(b.q_kvar) AS q_kvar
 RETURN r.id AS line, sqrt(p_kw * p_kw + q_kvar * q_kvar) AS kva, r.cap_kva AS rating_kva
