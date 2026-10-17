@@ -178,6 +178,15 @@ def test_a_declined_plan_is_not_pushed_again(falkordb, graph):
     assert tools.unfinished() is None
 
 
+def test_an_agent_that_gives_up_after_a_few_failed_designs_is_asked_to_revise(falkordb, graph):
+    tools = isolated_by_tools(falkordb, graph)
+    tools.call("simulate_plan", DESIGNS[0])
+    assert "None of your 1 restoration designs passed" in tools.unfinished()
+    for _ in range(3):
+        tools.call("simulate_plan", DESIGNS[0])
+    assert tools.unfinished() is None
+
+
 def test_an_agent_that_stops_before_isolating_is_reminded(falkordb, graph):
     apply_fault(graph, "4-5")
     tools = GridTools(falkordb, graph, approve=lambda plan: True)

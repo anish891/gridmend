@@ -374,7 +374,7 @@ gridmend agent 4-5 --auto                  # stage 1: hospital and fire station
 gridmend dg --reconnect                    # solar on bus 21 returns once its zone has power
 gridmend agent --auto                      # stage 2: the agent plans again on the same incident
 gridmend reset
-pytest                                     # 139 tests, on scratch graphs, with scripted models
+pytest                                     # 141 tests, on scratch graphs, with scripted models
 gridmend eval                              # baselines + the recorded agent rows
 gridmend eval --agent                      # run the agent on all 23 faults and record it
 gridmend api                               # HTTP API on :8000

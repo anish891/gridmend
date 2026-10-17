@@ -158,8 +158,17 @@ class GridTools:
                 "MATCH (z:Zone {energized: false, faulted: false}) "
                 "WHERE NOT coalesce(z.cut_off, false) RETURN count(z)"
             ).result_set[0][0]
-            return ("Healthy zones are still dark and no restoration plan was simulated. Design "
-                    "one from zone_map and simulate it." if dark and not tried else None)
+            if not dark:
+                return None
+            if not tried:
+                return ("Healthy zones are still dark and no restoration plan was simulated. Design "
+                        "one from zone_map and simulate it.")
+            # Giving up after a few overloads leaves load dark that a partial plan could carry.
+            if tried < 4:
+                return (f"None of your {tried} restoration designs passed. Revise before giving up: "
+                        "open sectionalizers so each tie feeds only the zones its path can carry, "
+                        "leaving out those without critical sites first, and simulate again.")
+            return None
         if "execute_restoration" in offered:
             return ("Restoration plans have passed simulation but none was executed. Choose one, "
                     "execute it and explain it.")
