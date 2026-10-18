@@ -539,3 +539,7 @@ balanced power flow.
 
 None of these combines an LLM agent, a graph-database twin, verify-before-act on a fork and a
 stored, explainable decision trace.
+
+## Use of AI tools
+
+AI tools were used for help while building this project.
