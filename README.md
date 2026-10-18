@@ -1,7 +1,7 @@
 # GridMend: a self-healing grid agent on a FalkorDB twin
 
 > **An LLM agent that locates, isolates and restores faults on its own, with 0 unsafe plans across
-> all 23 single faults and 85% of the best possible restoration.** The same model planning alone,
+> all 23 single faults and 85% of the best possible restoration.** A language model planning alone,
 > without the graph and the simulator, produced unsafe switching in 20 of 23.
 
 GridMend is an LLM agent that restores power after a fault on a distribution feeder, working on
