@@ -543,3 +543,7 @@ stored, explainable decision trace.
 ## Use of AI tools
 
 AI tools were used for help while building this project.
+
+## Author
+
+Built by [Anish Tejwani](https://anishtejwani.dev).
